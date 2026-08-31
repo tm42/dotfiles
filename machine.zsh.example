@@ -1,0 +1,46 @@
+# ~/.config/punto/machine.zsh — per-machine values, never committed.
+#
+# Copy this file to ~/.config/punto/machine.zsh and edit. .zshrc sources it in
+# §2, before everything that might read these. Anything here is by definition
+# something the repo must not know: a path that exists only on this machine, a
+# tool installed only here, a preference that differs between home and work.
+#
+# Secrets do NOT go here — they go in ~/.config/secrets/secrets.zsh, which is
+# sourced on the line above this one and is likewise never committed.
+
+# ── tmux sessionizer (M-o) ───────────────────────────────────
+# Colon-separated. ROOTS are scanned at depth 1 and 2, so both $root/apps and
+# $root/apps/thing are offered. EXTRA are listed as-is, no children scanned.
+export TMUX_SESSIONIZER_ROOTS="$HOME/code"
+export TMUX_SESSIONIZER_EXTRA="$HOME/.config/nvim:$HOME/.claude:$HOME"
+
+# ── Pane-status notification threshold ───────────────────────
+# Commands at least this slow that finish in a *background* pane raise a
+# status-line nudge. 0 disables. Default 30.
+# export TMUX_PS_NOTIFY_SEC=30
+
+# ── Claude Code notification sound ───────────────────────────
+# A macOS alert sound name, or "" for silent. Default Submarine.
+# export CLAUDE_NOTIFY_SOUND=Submarine
+
+# ── Machine-local tools ──────────────────────────────────────
+# Cloud CLIs, language toolchains, work VPN helpers — anything installed only
+# here. .zshrc puts nothing on PATH but Homebrew's own directories, so every
+# other bin directory belongs in this file, guarded by [ -d ] so a machine
+# without the tool carries no dead entry.
+#
+# These run after §1's Homebrew prepend, so each lands ahead of Homebrew, and
+# the LAST prepend ends up first on PATH. uv is last below because its shims
+# must beat Homebrew's python3; drop that line on a machine that does not use uv.
+# [ -d "$HOME/.cargo/bin" ] && path=("$HOME/.cargo/bin" $path)
+# [ -d "$HOME/.bun/bin" ]   && path=("$HOME/.bun/bin" $path)
+# [ -d "$HOME/.local/bin" ] && path=("$HOME/.local/bin" $path)
+# [ -f "$HOME/google-cloud-sdk/path.zsh.inc" ]       && source "$HOME/google-cloud-sdk/path.zsh.inc"
+# NOTE: a completion script that calls compdef must NOT go here — this file is
+# sourced by .zshrc §2, before compinit. Put it in ~/.zshrc.local, which §11
+# sources last.
+# [ -f "$HOME/google-cloud-sdk/completion.zsh.inc" ] && source "$HOME/google-cloud-sdk/completion.zsh.inc"
+
+# ── Machine-local aliases ────────────────────────────────────
+# Shortcuts naming directories that exist only on this machine.
+# alias notes="cd ~/notes/ && $EDITOR ."

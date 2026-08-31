@@ -1,0 +1,157 @@
+# ─────────────────────────────────────────────────────────────
+# .zshrc — interactive shell
+#
+# The section order below is load-bearing, not cosmetic: §4 must precede §5,
+# and §7 must come after both. Each section says why.
+#
+# Two files are sourced and neither is in this repo:
+#   ~/.config/secrets/secrets.zsh        API keys and tokens (chmod 600)
+#   ~/.config/punto/machine.zsh          per-machine paths — see machine.zsh.example
+# Nothing machine-specific or secret belongs in this file.
+# ─────────────────────────────────────────────────────────────
+
+# ── 1. PATH ──────────────────────────────────────────────────
+# `typeset -U` keeps the array unique with the first occurrence winning, so the
+# prepends in ~/.config/punto/machine.zsh can't introduce duplicates.
+# Appending to $path instead of assigning a literal string preserves whatever
+# /etc/paths.d contributed — a hardcoded assignment silently drops entries like
+# ~/.orbstack/bin.
+#
+# Only Homebrew's own directories are added here. A tool this repo does not
+# install — uv, bun, cargo, anything else — goes on PATH in machine.zsh, guarded
+# by [ -d ], so a machine that lacks it carries no dead entry.
+typeset -U path PATH
+
+# Homebrew's prefix varies by platform: /opt/homebrew on Apple Silicon,
+# /usr/local on Intel, /home/linuxbrew/.linuxbrew on Linux. `brew --prefix`
+# cannot answer here — brew is not on PATH until this block puts it there.
+BREW_PREFIX=""
+for _p in /opt/homebrew /usr/local /home/linuxbrew/.linuxbrew; do
+  [[ -x $_p/bin/brew ]] && { BREW_PREFIX=$_p; break }
+done
+unset _p
+
+[[ -n $BREW_PREFIX ]] && path=(
+  $BREW_PREFIX/bin                # ahead of /usr/bin: OpenSSL 3.x over Apple's LibreSSL
+  $BREW_PREFIX/opt/openjdk/bin
+  $path
+)
+
+# GUI-app CLIs, macOS only. Guarded on existence so a machine without either
+# does not carry a dead PATH entry.
+if [[ $OSTYPE == darwin* ]]; then
+  for _p in "/Applications/Visual Studio Code.app/Contents/Resources/app/bin" \
+            /Applications/iTerm.app/Contents/Resources/utilities; do
+    [[ -d $_p ]] && path=("$_p" $path)
+  done
+  unset _p
+fi
+
+# ── 2. Secrets and machine values ────────────────────────────
+# Early, so everything below can see the tokens and paths.
+[[ -f ~/.config/secrets/secrets.zsh ]]  && source ~/.config/secrets/secrets.zsh
+[[ -f ~/.config/punto/machine.zsh ]]    && source ~/.config/punto/machine.zsh
+
+# ── 3. Environment ───────────────────────────────────────────
+export EDITOR="nvim"
+export ZSH="$HOME/.oh-my-zsh"
+export CLAUDE_CODE_TMUX_TRUECOLOR=1
+
+# agnoster colours, matched to the Claude statusline's "teal native" palette.
+# The shared first-line segments — host, venv, path, git — use the same values in
+# both, so the prompt and the statusline read as one bar. See
+# ~/.claude/statusline-agnoster.sh for the other half.
+#
+# Hex needs zsh 5.7+ (prompt_segment feeds these to both %K{} and %F{}) and a
+# truecolor terminal; under tmux that also needs CLAUDE_CODE_TMUX_TRUECOLOR above
+# for Claude Code's own rendering, though the prompt itself is unaffected by it.
+
+# user@host — identity family, lightest
+export AGNOSTER_CONTEXT_BG='#6b9daf'
+export AGNOSTER_CONTEXT_FG='#0d0d0d'
+
+# virtualenv — identity family, middle
+export AGNOSTER_VENV_BG='#5e7c87'
+export AGNOSTER_VENV_FG='#0d0d0d'
+
+# working directory — identity family, darkest; was ANSI `blue`, the one segment
+# whose colour the terminal profile could change out from under the theme
+export AGNOSTER_DIR_BG='#2e6072'
+export AGNOSTER_DIR_FG='#f4f4f4'
+
+# git — xterm 151 and 230 kept verbatim, the two colours worth not touching
+export AGNOSTER_GIT_CLEAN_BG='#afd7af'   # sage
+export AGNOSTER_GIT_CLEAN_FG='#0d0d0d'
+export AGNOSTER_GIT_DIRTY_BG='#ffffd7'   # buttermilk
+export AGNOSTER_GIT_DIRTY_FG='#0d0d0d'
+
+# exit status / root / background jobs — no counterpart in the statusline, but
+# left stock it renders ANSI black-and-red against all of the above
+export AGNOSTER_STATUS_BG='#1d424f'
+export AGNOSTER_STATUS_FG='#f4f4f4'
+export AGNOSTER_STATUS_RETVAL_FG='#e27b70'   # ctx band 4 coral
+export AGNOSTER_STATUS_ROOT_FG='#f6ce06'     # effort low yellow
+export AGNOSTER_STATUS_JOB_FG='#89c9e9'      # week band 3
+
+ZSH_THEME="agnoster"
+
+# ── 4. Completion fpath — BEFORE oh-my-zsh ───────────────────
+# oh-my-zsh runs compinit itself in §5. Brew's site-functions have to be on
+# fpath before that happens or those completions are invisible; this file used
+# to run a second compinit further down purely to catch them.
+[[ -n $BREW_PREFIX ]] && FPATH="${BREW_PREFIX}/share/zsh/site-functions:${FPATH}"
+
+# ── 5. oh-my-zsh ─────────────────────────────────────────────
+# zsh-autosuggestions and zsh-syntax-highlighting are deliberately absent here.
+# They wrap ZLE widgets and must load after fzf-tab in a fixed order — see §7.
+# Listing them here loaded them a second (and third) time, out of order.
+plugins=(git you-should-use zsh-bat)
+[[ -f $ZSH/oh-my-zsh.sh ]] && source $ZSH/oh-my-zsh.sh
+
+# ── 6. Tool integrations ─────────────────────────────────────
+# Every line here is guarded, so a machine missing the tool loses the feature
+# and nothing else.
+(( $+commands[zoxide] )) && eval "$(zoxide init zsh)"
+[ -e "$HOME/.iterm2_shell_integration.zsh" ] && source "$HOME/.iterm2_shell_integration.zsh"
+
+# ── 7. ZLE widget plugins — this order is mandatory ──────────
+# Each of these wraps the widgets installed before it. fzf-tab needs compinit
+# (done in §5) to already have run; syntax highlighting must be dead last or it
+# never sees — and so never colours — what the others installed.
+if [[ -n $BREW_PREFIX ]]; then
+  for _f in fzf-tab/fzf-tab.zsh \
+            zsh-autosuggestions/zsh-autosuggestions.zsh \
+            zsh-syntax-highlighting/zsh-syntax-highlighting.zsh; do
+    [[ -f $BREW_PREFIX/share/$_f ]] && source $BREW_PREFIX/share/$_f
+  done
+  unset _f
+fi
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=245'
+
+# ── 8. tmux pane status ──────────────────────────────────────
+# preexec/precmd hooks publishing @ps_state/@ps_cmd/@ps_code/@ps_dur, rendered
+# by window-status-format and pane-border-format in ~/.tmux.conf.
+[[ -f ~/.tmux/pane-status.zsh ]] && source ~/.tmux/pane-status.zsh
+
+# ── 9. Aliases ───────────────────────────────────────────────
+alias vim="nvim"
+alias bp='bat --plain'
+alias bct='bat --paging=never'
+
+# ── 10. claudea ──────────────────────────────────────────────
+# claudea = claude + whatever is in ~/.claude/append.md, for per-project instructions or
+# experiments. Prose and formatting rules do NOT belong there — the output-style slot is
+# the only one that gets a per-turn reminder, and rules without reinforcement decay over a
+# long session. No-ops to plain claude when the file is absent.
+claudea() {
+  local f=~/.claude/append.md
+  if [[ -r $f ]]; then
+    command claude --append-system-prompt "$(<$f)" "$@"
+  else
+    command claude "$@"
+  fi
+}
+
+# ── 11. Local overrides ──────────────────────────────────────
+# Last word, for anything this machine needs that the repo should not carry.
+[[ -f ~/.zshrc.local ]] && source ~/.zshrc.local

@@ -1,0 +1,66 @@
+# Nothing here is a substitute for the gitleaks pre-commit hook: .gitignore
+# cannot help with a secret pasted into a file that IS tracked. It exists to keep
+# the machine-local half of the split out, and to make the adjacency risk explicit.
+
+# ── The machine-local half ───────────────────────────────────
+# Created by hand during install and never committed. machine.zsh.example is.
+machine.zsh
+
+# ── Credential files, by name ────────────────────────────────
+# None of these live under dotfiles/, so none can be reached by the symlink loop
+# in INSTALL.md. Listed anyway: the cost is one line each, and the failure they
+# guard against is permanent.
+secrets.zsh
+.netrc
+.pypirc
+hosts.yml
+credentials
+rclone.conf
+*token*
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# ── Claude Code runtime state ────────────────────────────────
+# settings.local.json and .claude.json sit beside tracked files, which is the
+# only genuine adjacency risk in the layout. shell-snapshots is the sharp one:
+# it freezes the shell environment at session start, tokens included.
+# The **/ prefix is load-bearing: a pattern containing a slash is anchored to
+# this file's directory, so a bare `.claude/…` would never match the real path
+# `dotfiles/claude/.claude/…`.
+**/.claude/settings.local.json
+**/.claude.json
+**/.claude.json.backup
+**/.claude/shell-snapshots/
+**/.claude/projects/
+**/.claude/plugins/
+**/.claude/security/
+**/.claude/file-history/
+**/.claude/transcripts/
+**/.claude/memory/
+**/.claude/cache/
+**/.claude/backups/
+**/.claude/teams/
+**/.claude/telemetry/
+**/.claude/jobs/
+**/.claude/statsig/
+**/.claude/todos/
+**/.claude/append.md
+
+# ── Install residue ──────────────────────────────────────────
+*.bak
+*.bak.*
+*.orig
+*~
+
+# ── OS and editor ────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+
+# Completion caches — hostname-specific, regenerated on every shell start.
+.zcompdump*
+
+# review reports and team config — working notes, not part of the environment
+.flw/

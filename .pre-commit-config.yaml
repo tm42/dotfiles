@@ -1,0 +1,37 @@
+# Install once per clone:  pre-commit install
+#
+# gitleaks is the one that matters. .gitignore cannot help with a secret pasted
+# into a file that is already tracked, and git history is permanent: a credential
+# that lands in a commit is burned regardless of what a later commit removes.
+# Commit time is the only cheap moment.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.29.0
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-json
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.4
+    hooks:
+      - id: ruff-check      # lint only: check.py is hand-formatted on purpose,
+                            # and ruff-format would explode its `x if c else y` lines
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1-1
+    hooks:
+      - id: shellcheck   # shellcheck-py, not the Docker image: no daemon needed
+        # shellcheck does not speak zsh, and four of the six scripts here are zsh:
+        # git-status.sh, sessionizer.sh and claude-notify.sh open with #!/bin/zsh,
+        # and pane-status.zsh has no shebang because .zshrc sources it. All four
+        # use zsh-only globbing and parameter expansion.
+        files: '^(dotfiles/tmux/\.tmux/cheat\.sh|dotfiles/claude/\.claude/statusline-agnoster\.sh)$'
