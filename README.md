@@ -199,9 +199,11 @@ values, so the prompt and the bar above it read as one unit. The zsh half is `.z
 other half is `statusline-agnoster.sh`.
 
 The theme itself is stock. Colours are twelve `AGNOSTER_*` variables agnoster reads as
-defaults, exported in §3 before it loads. The two things no variable reaches — a truncated
-path and typing on the second line — are a `prompt_dir` and a `PROMPT` redefined in §5, after
-oh-my-zsh sources the theme. **Nothing here edits the theme file**, because it lives in the
+defaults, exported in §3 before it loads. What no variable reaches is redefined in §5, after
+oh-my-zsh sources the theme: a truncated path (`prompt_dir`), typing on the second line
+(`PROMPT`), and a venv named after the project rather than after the `.venv` directory
+(`prompt_virtualenv`, which stock gates on a variable only the unloaded `virtualenv` plugin
+exports, so it never drew and `activate` prepended its own uncoloured `(.venv) ` instead). **Nothing here edits the theme file**, because it lives in the
 vendored `~/.oh-my-zsh` clone: oh-my-zsh updates itself with `git pull --rebase` under
 `rebase.autoStash`, so an edit there is stashed and replayed — it survives while upstream
 leaves that file alone, then lands as a rebase conflict the first time upstream touches it.

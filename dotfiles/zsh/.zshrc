@@ -123,6 +123,23 @@ prompt_dir() {
   prompt_segment "$AGNOSTER_DIR_BG" "$AGNOSTER_DIR_FG" '%(4~|.../%3~|%~)'
 }
 
+# Virtualenv: stock gates its segment on VIRTUAL_ENV_DISABLE_PROMPT, exported by
+# oh-my-zsh's virtualenv plugin, which §5 does not load — so the segment never
+# drew and `activate` prepended its own uncoloured "(.venv) " to the bar instead.
+# Exporting the variable drops that prefix. The override then names the project,
+# because ${VIRTUAL_ENV:t} is ".venv" for every project-local venv and tells you
+# nothing; it is the rule statusline-agnoster.sh uses for the same segment.
+# Shows an activated venv only: the prompt describes this shell, and
+# `uv pip install --python .venv/bin/python` never activates one.
+# Drops stock's conda branch — nothing here uses conda.
+export VIRTUAL_ENV_DISABLE_PROMPT=1
+prompt_virtualenv() {
+  [[ -n $VIRTUAL_ENV ]] || return
+  local name=${VIRTUAL_ENV:t}
+  [[ $name == .venv ]] && name=${VIRTUAL_ENV:h:t}
+  prompt_segment "$AGNOSTER_VENV_BG" "$AGNOSTER_VENV_FG" "${name:gs/%/%%}"
+}
+
 # Type on line 2. Stock leaves the cursor on the same line as the segment bar,
 # which in a git repo is most of the terminal width.
 PROMPT='%{%f%b%k%}$(build_prompt)
