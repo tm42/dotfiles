@@ -63,9 +63,10 @@ Each package is a directory under `dotfiles/` whose contents mirror `$HOME`:
 dotfiles/
   zsh/     .zshrc
   tmux/    .tmux.conf + .tmux/{pane-status.zsh,git-status.sh,sessionizer.sh,
-                               cheat.sh,claude-notify.sh}
+                               cheat.sh,agent-notify.sh}
   nvim/    .config/nvim/{init.lua,lazy-lock.json,lua/**}
   claude/  .claude/statusline-agnoster.sh
+  codex/   .codex/hooks.json
   docs/    .nvimcheatsheet.md, .tmux-quickstart.md
 ```
 
@@ -73,11 +74,18 @@ dotfiles/
 those three call. Nothing else. Other tools that install themselves are not in it and are
 not touched by it, even where they write to the same files.
 
-Claude Code appears in one place on screen, because in one place it renders into the
-terminal: `statusline-agnoster.sh`, whose palette is matched to the agnoster prompt. INSTALL.md
-step 7 writes two keys into `~/.claude/settings.json` — `statusLine`, and a `claude-notify.sh`
-entry on the `Notification` and `Stop` hooks — and leaves every other key alone, including
-hooks belonging to other tools that share an entry with it.
+Coding agents are in scope only where they render into the terminal. For Claude Code that
+is `statusline-agnoster.sh`, whose palette is matched to the agnoster prompt; INSTALL.md
+step 7 writes `statusLine` and an `agent-notify.sh` entry on four hooks —
+`UserPromptSubmit`, `PermissionRequest`, `Notification`, `Stop` — and leaves every other key
+alone, including hooks belonging to other tools that share an entry with it. `statusLine` it
+writes only when the key is absent or already this repo's: a statusline you configured
+yourself survives, and the step names it rather than leaving you to wonder.
+
+Codex is the same two seams and one file less: it draws its own status line, so all this
+repo ships is `hooks.json`. Its `[tui].terminal_title` is added by hand rather than
+symlinked, because Codex writes per-project trust into `~/.codex/config.toml` and a
+symlink would put your local project paths into a public git history.
 
 ### Not vendored
 
@@ -118,10 +126,56 @@ silently breaks the other.
 | Pane is | Tab shows | Example |
 |---|---|---|
 | nvim | `✎:` + repo/file | `✎:punto/README.md` |
-| Claude Code | session name | `punto` |
+| an agent, working | `Working \| ` + name | `Working \| punto` |
+| an agent, blocked on you | `Action Required \| ` + name | `Action Required \| punto` |
+| an agent, finished and unread | `Ready \| ` + name | `Ready \| testing-session` |
+| an agent, idle | name | `testing-session` |
 | running a command | `▶` + command | `▶ pytest -x` |
 | finished a command | `✔` or `✘<code>` + command | `✘1 cargo build` |
 | idle | cwd basename | `~` |
+
+Both agents render in Codex's own words, because Codex picked good ones and the rule is
+then a sentence: **the tab shows what Codex would say.** For Codex it is close to a
+passthrough of its pane title — strip the `activity` prefix, keep the rest. For Claude the
+same string is synthesised from hooks, because Claude's pane title is a constant
+`✳ <session>` that does not change even while it is working. Sampled 14 times over 5.6s
+mid-turn, it was byte-identical every time; the spinner frames an earlier version of this
+config matched for do not exist.
+
+| State | Codex | Claude |
+|---|---|---|
+| `Working` | its title | `UserPromptSubmit` hook |
+| `Action Required` | its title | `PermissionRequest` hook |
+| `Ready` | `Stop` hook — **not** its title | `Stop` and `Notification` hooks |
+| idle | visiting the pane clears `Ready` | visiting the pane clears `Ready` |
+
+`Ready` is the row worth reading twice. Codex's title reports `Ready` for a turn that just
+ended *and* for a pane nobody has touched since yesterday, so the title alone cannot tell
+you a question is waiting — which is exactly the case where Codex finishes by asking you
+something. It comes from `Stop` for both agents instead, and a turn that ends while you are
+looking at the pane clears the state rather than setting it, because "unread" is false when
+you are reading it.
+
+A live `Working` title is checked before everything, so approving a Codex request corrects
+the tab at once. **Claude has no such title**, so its `Action Required` stands until the turn
+ends — a bounded lie, and the alternative is a hook on every tool call. `Action Required` is
+also the one state visiting does not clear: an approval you have looked at and not answered
+is still an approval.
+
+Claude's `Notification` maps to `Ready`, not to `Action Required`, because it fires both for
+a permission prompt and after sitting idle 60 seconds — and the second is the opposite of
+blocked on you. `PermissionRequest` is the event that means only the one thing. `Notification`
+then declines to overwrite an existing `Action Required`, since Claude fires it 60 seconds
+into a prompt that is still pending.
+
+The pane border carries the same label, from the same two options — a tab can only ever
+speak for the active pane, so in a split window the other agent would otherwise show the
+border's `@ps_cmd`, which for an agent pane is frozen at `▶ codex` from the moment zsh's
+`preexec` saw the launch.
+
+Anything else falls through and the remaining title is shown verbatim. That is the design,
+not a gap: a Codex run-state nobody has seen yet is already a word, so an untranslated
+state still reads correctly — `Compacting | punto` costs nothing.
 
 The exit glyph survives the command, which is the point — a build that failed while you were
 in another window still says so. Visiting the pane acknowledges it and the tab drops back to
@@ -168,11 +222,18 @@ Hex colours need a truecolor terminal, and under tmux Claude Code additionally n
 `CLAUDE_CODE_TMUX_TRUECOLOR=1` (`.zshrc` §3), or it clamps 24-bit to the 256 cube and the
 palette collapses into itself.
 
-### Claude Code tells you when it needs you
+### The agents tell you when they need you, in one vocabulary
 
-`~/.tmux/claude-notify.sh` fires on the `Notification` and `Stop` hooks and raises a tmux
-message plus a macOS notification — but only when the Claude pane is in the background. It
-always exits 0: a hook that errors nags Claude, not you.
+`~/.tmux/agent-notify.sh` serves both. Claude Code and Codex deliver the same hook payload
+— a JSON object on stdin with `.hook_event_name` and `.cwd` — so one script handles
+four events from Claude and two from Codex, and takes the label from its first argument. It
+raises a tmux message only when that agent's pane is in the background, and always exits 0:
+a hook that errors nags the agent, not you. It also sets the `@agent_state` the window tab
+and pane border read.
+
+The macOS banner is off until you export `AGENT_NOTIFY_BANNER` — at one per turn it is a
+lot of banners, and the tmux strip already says it where you are looking. Which also means
+that outside tmux you get nothing until you export it.
 
 ---
 
@@ -242,7 +303,7 @@ tracked.
 credential patterns and fails the commit:
 
 ```bash
-pre-commit install     # per clone — INSTALL.md step 8; git does not clone hooks
+pre-commit install     # per clone — INSTALL.md step 9; git does not clone hooks
 ```
 
 Commit time is the only cheap moment. Git history is permanent — a credential that lands in a

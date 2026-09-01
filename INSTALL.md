@@ -7,7 +7,7 @@ A program that runs twice and can delete your files is a bad trade.
 
 Read each step before running it. Every command here is one you can inspect first.
 
-Assumes macOS or Linux, Homebrew, and git. Steps 1–10 take about twenty minutes.
+Assumes macOS or Linux, Homebrew, and git. Steps 1–11 take about twenty minutes.
 
 ---
 
@@ -53,7 +53,7 @@ Three of those are easy to skip and all three matter:
   brew installs it anyway as a neovim dependency — it ships no binary. `nvim-treesitter`
   shells out to the CLI to build each parser, so without this formula `python`, `bash`,
   `json`, `yaml` and `toml` fall back to vim's regex highlighting and nvim says so once
-  per launch. `pre-commit` is for step 8.
+  per launch. `pre-commit` is for step 9.
 
 ## 3. Clone the third-party pieces
 
@@ -175,14 +175,23 @@ cp -n ~/.claude/settings.json ~/.claude/settings.json.bak
 # setting you changed in between. .prev is just this run's before-picture for the diff.
 cp    ~/.claude/settings.json ~/.claude/settings.json.prev
 
+# Say so if you already have a statusline of your own. The step below keeps it.
+jq -r '.statusLine.command // empty' ~/.claude/settings.json.prev \
+  | grep -v statusline-agnoster.sh \
+  | sed 's|^|kept your existing statusLine: |'
+
 jq '
+  def punto_sl: {"type": "command", "command": "~/.claude/statusline-agnoster.sh"};
   def rewire($e): .hooks[$e] = (
       ((.hooks[$e] // [])
-       | map(.hooks |= map(select((.command // "") | contains("claude-notify.sh") | not)))
+       | map(.hooks |= map(select((.command // "") | test("(claude|agent)-notify\\.sh") | not)))
        | map(select((.hooks | length) > 0)))
       + [{"matcher": "", "hooks": [{"type": "command",
-          "command": "$HOME/.tmux/claude-notify.sh"}]}]);
-  .statusLine = {"type": "command", "command": "~/.claude/statusline-agnoster.sh"}
+          "command": "$HOME/.tmux/agent-notify.sh claude"}]}]);
+  .statusLine = (if (.statusLine | type) != "object"
+                    or (.statusLine.command // "" | contains("statusline-agnoster.sh"))
+                 then punto_sl else .statusLine end)
+  | rewire("UserPromptSubmit") | rewire("PermissionRequest")
   | rewire("Notification") | rewire("Stop")
 ' ~/.claude/settings.json.prev > ~/.claude/settings.json.tmp \
   && mv ~/.claude/settings.json.tmp ~/.claude/settings.json \
@@ -192,8 +201,20 @@ diff <(jq -S . ~/.claude/settings.json.prev) <(jq -S . ~/.claude/settings.json)
 rm -f ~/.claude/settings.json.prev
 ```
 
-`rewire` strips any existing `claude-notify.sh` **hook** before adding the current one, so
-running this twice does not give you two notifications per event.
+**It will not take a statusline away from you.** `.statusLine` is set only when the key is
+absent or already points at `statusline-agnoster.sh`; anything else you had configured is
+left exactly where it is, and the `jq -r` line above names it so you are not left guessing
+why the bar did not change. Switching over is then yours to do deliberately:
+
+```sh
+jq '.statusLine = {"type": "command", "command": "~/.claude/statusline-agnoster.sh"}' \
+   ~/.claude/settings.json > /tmp/s.json && mv /tmp/s.json ~/.claude/settings.json
+```
+
+`rewire` strips any existing notifier **hook** before adding the current one, so running
+this twice does not give you two notifications per event. It matches `claude-notify.sh` as
+well as the current `agent-notify.sh`, so an install made before the rename is repaired by
+re-running this step rather than by editing JSON by hand.
 
 It filters at the hook level, not the entry level, and that distinction is the whole
 reason this is written out rather than done casually: one entry can hold several hooks. If
@@ -202,11 +223,74 @@ out with it. `map(select((.hooks | length) > 0))` then removes an entry only onc
 genuinely empty.
 
 The closing `diff` shows exactly what changed. Read it before moving on — it should name
-`statusLine` and the two hook events and nothing else. On a re-run it prints nothing at
+`statusLine` and the four hook events and nothing else. On a re-run it prints nothing at
 all, which is the correct result: the two keys are already what this step sets them to,
 and everything you changed since is left where it is.
 
-## 8. The commit hook
+### The notification banner is opt-in
+
+The two hooks give you a tmux status-line nudge when Claude finishes or wants permission
+in a pane you are **not** looking at. That part is always on — it costs one line at the
+bottom of a screen you are already reading.
+
+A macOS notification banner on top of that is off unless you ask for it, because at one
+per turn it is a lot of banners. Turn it on in `~/.config/punto/machine.zsh` (step 6):
+
+```sh
+export AGENT_NOTIFY_BANNER=1        # macOS banner as well as the tmux strip
+export AGENT_NOTIFY_SOUND=Submarine # or "" for a silent banner
+```
+
+Outside tmux the banner is the only channel there is, so without it you get nothing.
+
+## 8. Codex (skip if you do not use it)
+
+`brew install --cask codex` if you have not already. Two pieces: a title Codex publishes
+for tmux to read, and a hook that tells you when it wants you.
+
+**The title.** This one is added by hand, because Codex writes to `~/.codex/config.toml`
+itself — it records per-project trust in there — so that file cannot be a symlink into a
+public repo without your local project paths landing in its git history.
+
+Add to `~/.codex/config.toml`:
+
+```toml
+[tui]
+terminal_title = ["activity", "run-state", "thread-title"]
+```
+
+If the file already has a `[tui]` table, add the `terminal_title` line **inside it**. A
+second `[tui]` is a duplicate-table error and Codex then loads no config at all — not just
+no title. Check either way:
+
+```sh
+codex doctor --summary | grep -E 'config|title'   # expect ✓ on both
+```
+
+`run-state` is what earns the tab its state word: it renders `Ready`, `Working` or
+`Action Required`, and `.tmux.conf`'s `@tab` shows those verbatim ahead of the name. It has to
+be the **first `|`-separated field**, because that is where `@tab` reads it. `activity` may
+sit ahead of it and often should — it is a prefix, not a field, rendering `⠦` while working
+and a blinking `[ . ]` / `[ ! ]` while waiting, so it says the same thing in a bare terminal
+window title where nothing is translating anything.
+
+`thread-title` last, which assumes you name your threads — until one is named it renders
+the raw thread UUID, accurate and useless in a 40-cell tab. Use `project` there instead if
+you do not. `./check.py codex` tells you if the placement or the ordering stops the state
+word reaching the tab; it does not have
+an opinion about the last field.
+
+**The hook.** This file Codex only reads, so step 5 already symlinked it:
+
+```sh
+ls -l ~/.codex/hooks.json          # -> ~/punto/dotfiles/codex/.codex/hooks.json
+```
+
+It wires `agent-notify.sh` to `PermissionRequest` and `Stop`, the same two moments step 7
+wires for Claude. Then start `codex` once and run `/hooks` to review and trust it — Codex
+will not run a hook you have not approved, and says nothing when it skips one.
+
+## 9. The commit hook
 
 Skip only if you will never commit in this clone.
 
@@ -225,7 +309,7 @@ is the only control here that catches a secret pasted into a file that is alread
 git history is permanent, and a credential that lands in a commit is burned whatever a
 later commit removes.
 
-## 9. First run
+## 10. First run
 
 In order. Each step needs the one before it.
 
@@ -241,7 +325,7 @@ nvim                     # 3. lazy.nvim fetches its plugins, then mason fetches 
 
 `C-a` is the tmux prefix: hold Ctrl, tap `a`, release, then tap `I` (capital).
 
-## 10. Check
+## 11. Check
 
 ```sh
 ./check.py
@@ -271,6 +355,15 @@ Two exceptions, both rare:
   `./check.py links` says `missing` when this has happened.
 - **`machine.zsh.example` gained a setting you want.** Copy the line across by hand;
   your `machine.zsh` is deliberately never overwritten.
+- **`claude-notify.sh` became `agent-notify.sh`.** One notifier now serves Claude and
+  Codex. `./check.py claude` fails while `~/.claude/settings.json` still names the old
+  path; re-run step 7 to fix it, and `rm ~/.tmux/claude-notify.sh` — that symlink is
+  dangling, and the uninstall loop no longer knows the name to remove it.
+- **The macOS banner is now opt-in, and you will notice.** The old notifier raised one
+  unconditionally; this one raises none until `AGENT_NOTIFY_BANNER` is set. Outside tmux
+  that leaves you with nothing at all. `CLAUDE_NOTIFY_SOUND` was renamed to
+  `AGENT_NOTIFY_SOUND` and the old name does nothing — put both in
+  `~/.config/punto/machine.zsh`, which `machine.zsh.example` now shows.
 
 ## Uninstalling
 
@@ -283,6 +376,8 @@ for pkg in dotfiles/*/; do
 done
 ```
 
-Only removes symlinks — `[ -L ]` means a real file you created later is left alone.
-Then restore whatever you saved in step 4, and undo step 7 from
-`~/.claude/settings.json.bak`.
+Only removes symlinks — `[ -L ]` means a real file you created later is left alone. That
+loop takes `~/.codex/hooks.json` with it, but not the `[tui]` block you added by hand to
+`~/.codex/config.toml`; delete that yourself or Codex keeps publishing a title nothing
+reads. Then restore whatever you saved in step 4, and put `~/.claude/settings.json.bak`
+back to undo step 7.

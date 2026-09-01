@@ -19,9 +19,13 @@ export TMUX_SESSIONIZER_EXTRA="$HOME/.config/nvim:$HOME/.claude:$HOME"
 # status-line nudge. 0 disables. Default 30.
 # export TMUX_PS_NOTIFY_SEC=30
 
-# ── Claude Code notification sound ───────────────────────────
-# A macOS alert sound name, or "" for silent. Default Submarine.
-# export CLAUDE_NOTIFY_SOUND=Submarine
+# ── Coding-agent notifications ───────────────────────────────
+# The tmux status strip is always on. A macOS banner on top of it is not — at
+# one per turn it is a lot of banners, and outside tmux it is the only channel
+# there is. Set BANNER to anything non-empty to get it.
+# export AGENT_NOTIFY_BANNER=1
+# A macOS alert sound name for that banner, or "" for silent. Default Submarine.
+# export AGENT_NOTIFY_SOUND=Submarine
 
 # ── Machine-local tools ──────────────────────────────────────
 # Cloud CLIs, language toolchains, work VPN helpers — anything installed only

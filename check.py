@@ -13,13 +13,15 @@ automate and cannot hurt you if it is wrong.
 Stdlib only, Python 3.9 — what macOS ships at /usr/bin/python3.
 
     ./check.py            check everything
-    ./check.py links      just one section (links, tools, clones, machine, claude, repo)
+    ./check.py links      just one section (links, tools, clones, machine,
+                          claude, codex, repo)
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -30,6 +32,7 @@ PKGROOT = REPO / "dotfiles"
 HOME = Path.home()
 MACHINE = HOME / ".config" / "punto" / "machine.zsh"
 CLAUDE_SETTINGS = HOME / ".claude" / "settings.json"
+CODEX_CONFIG = HOME / ".codex" / "config.toml"
 
 # Homebrew formulae the configs need. Formula → the command it provides, or None
 # when it ships a shell source with no binary (checked under share/ instead).
@@ -64,8 +67,10 @@ CLONES = {
 TPM_PLUGINS = ["tmux-sensible", "tmux-yank", "tmux-thumbs", "extrakto"]
 
 STATUSLINE_CMD = "~/.claude/statusline-agnoster.sh"
-NOTIFY_NAME = "claude-notify.sh"
-NOTIFY_EVENTS = ("Notification", "Stop")
+NOTIFY_NAME = "agent-notify.sh"
+# UserPromptSubmit is not for notifying — it is the only way to know Claude
+# started, because its pane title never changes. See agent-notify.sh.
+NOTIFY_EVENTS = ("UserPromptSubmit", "PermissionRequest", "Notification", "Stop")
 
 BOLD, DIM, GREEN, YELLOW, RED, OFF = (
     "\033[1m", "\033[2m", "\033[32m", "\033[33m", "\033[31m", "\033[0m")
@@ -260,7 +265,7 @@ def check_claude():
         warn(f"{tilde(CLAUDE_SETTINGS)} absent — see INSTALL.md step 7")
         return
     try:
-        s = json.loads(CLAUDE_SETTINGS.read_text())
+        s = json.loads(CLAUDE_SETTINGS.read_text(errors="replace"))
     except json.JSONDecodeError as exc:
         bad(f"settings.json does not parse: {exc}")
         return
@@ -268,18 +273,88 @@ def check_claude():
         bad("settings.json is not a JSON object")
         return
 
-    if (s.get("statusLine") or {}).get("command") == STATUSLINE_CMD:
+    live = (s.get("statusLine") or {}).get("command")
+    if live == STATUSLINE_CMD:
         ok("statusLine points at this repo's script")
+    elif live:
+        # Step 7 refuses to overwrite a statusline you configured yourself, so
+        # this is a choice until proven otherwise — report it, do not fail on it.
+        warn(f"statusLine is your own {live!r}, not {STATUSLINE_CMD!r}"
+             " — INSTALL.md step 7 has the one-liner to switch")
     else:
-        bad(f"statusLine is {(s.get('statusLine') or {}).get('command')!r}"
-            f" — expected {STATUSLINE_CMD!r}")
+        bad(f"no statusLine set — expected {STATUSLINE_CMD!r}  (INSTALL.md step 7)")
+
+    def hook_cmds(event):
+        return [str(h.get("command", ""))
+                for entry in s.get("hooks", {}).get(event, []) or []
+                for h in entry.get("hooks", []) or []]
 
     absent = [e for e in NOTIFY_EVENTS
-              if not any(NOTIFY_NAME in str(h.get("command", ""))
-                         for entry in s.get("hooks", {}).get(e, []) or []
-                         for h in entry.get("hooks", []) or [])]
-    ok("notifier wired on " + ", ".join(NOTIFY_EVENTS)) if not absent else \
-        bad("notifier missing on " + ", ".join(absent))
+              if not any(NOTIFY_NAME in c for c in hook_cmds(e))]
+    if not absent:
+        ok("notifier wired on " + ", ".join(NOTIFY_EVENTS))
+    else:
+        stale = [e for e in absent if any("claude-notify.sh" in c for c in hook_cmds(e))]
+        bad("notifier missing on " + ", ".join(absent)
+            + (" — still on the pre-rename claude-notify.sh; re-run INSTALL.md step 7"
+               if stale else ""))
+
+
+def check_codex():
+    say("Codex")
+    if not shutil.which("codex"):
+        warn("codex not installed — skipping  (brew install --cask codex)")
+        return
+
+    if not CODEX_CONFIG.is_file():
+        bad(f"{tilde(CODEX_CONFIG)} absent — see INSTALL.md step 8")
+        return
+    # errors="replace" because this file only ever gets read: a stray non-UTF-8
+    # byte in it used to abort the whole run with a traceback and take every
+    # later section down with it. terminal_title is ASCII, so a replacement
+    # character cannot change a verdict.
+    body = CODEX_CONFIG.read_text(errors="replace")
+
+    # Checked first, and it returns: a duplicate table means Codex loads NO
+    # config, so reporting on a terminal_title below it would tick a line Codex
+    # is not reading. Matched per line, not counted as a substring — "[tui]" in
+    # a comment, or a [projects."/x/[tui]/y"] trust key, is not a table.
+    if len(re.findall(r"^\s*\[tui\]\s*$", body, re.M)) > 1:
+        bad("two [tui] tables — a duplicate table makes Codex load no config at all")
+        return
+
+    # Not parsed as TOML: this has to run on the python3 macOS ships, and
+    # tomllib arrived in 3.11. Only one line matters — but it matters WHERE it
+    # is, so slice the [tui] table out first. A terminal_title in the root table
+    # or under [projects."…"] is a key Codex never reads, and it is the exact
+    # mistake INSTALL.md step 8 warns about.
+    tui = re.search(r"^\s*\[tui\]\s*$(.*?)(?=^\s*\[|\Z)", body, re.M | re.S)
+    if not tui:
+        bad("no [tui] table — see INSTALL.md step 8")
+        return
+
+    # [^\[\]]*? and not .*? : an unclosed bracket used to run the match on into
+    # the next table header, reporting a config Codex refuses to load as fine.
+    m = re.search(r"^\s*terminal_title\s*=\s*\[([^\[\]]*?)\]", tui.group(1), re.M | re.S)
+    if not m:
+        bad("[tui] has no terminal_title — the tab shows Codex's raw pane title"
+            " and no state word  (INSTALL.md step 8)")
+        return
+
+    items = [i.strip().strip('\'"') for i in m.group(1).split(",") if i.strip()]
+    # @tab needs run-state to be the FIRST " | "-separated field, because it
+    # reads that word. `activity` is exempt: it is a prefix rather than a field,
+    # rendering "\u2826 " or "[ . ]" with no separator after it.
+    fields = [i for i in items if i != "activity"]
+    if fields[:1] == ["run-state"]:
+        ok("terminal_title: " + " ".join(items))
+    elif "run-state" in items:
+        warn("run-state is not the first field in terminal_title: " + " ".join(items)
+             + " \u2014 an earlier field displaces the state word and the tab shows"
+             " the raw title")
+    else:
+        warn("terminal_title has no run-state: " + " ".join(items)
+             + " \u2014 the tab can never say Action Required for Codex")
 
 
 def check_repo():
@@ -317,6 +392,7 @@ SECTIONS = {
     "clones": check_clones,
     "machine": check_machine,
     "claude": check_claude,
+    "codex": check_codex,
     "repo": check_repo,
 }
 
