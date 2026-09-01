@@ -6,9 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.tmux/agent-notify.sh codex",
-            "async": true,
-            "timeout": 5
+            "command": "~/.tmux/agent-notify.sh codex"
           }
         ]
       }
@@ -19,9 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.tmux/agent-notify.sh codex",
-            "async": true,
-            "timeout": 5
+            "command": "~/.tmux/agent-notify.sh codex"
           }
         ]
       }
