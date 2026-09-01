@@ -101,12 +101,32 @@ ZSH_THEME="agnoster"
 # to run a second compinit further down purely to catch them.
 [[ -n $BREW_PREFIX ]] && FPATH="${BREW_PREFIX}/share/zsh/site-functions:${FPATH}"
 
-# ── 5. oh-my-zsh ─────────────────────────────────────────────
+# ── 5. oh-my-zsh and the prompt ──────────────────────────────
 # zsh-autosuggestions and zsh-syntax-highlighting are deliberately absent here.
 # They wrap ZLE widgets and must load after fzf-tab in a fixed order — see §7.
 # Listing them here loaded them a second (and third) time, out of order.
 plugins=(git you-should-use zsh-bat)
 [[ -f $ZSH/oh-my-zsh.sh ]] && source $ZSH/oh-my-zsh.sh
+
+# Two changes to the agnoster theme, which lives in the vendored ~/.oh-my-zsh
+# clone. They are made here, after the theme is sourced, because oh-my-zsh
+# updates itself with `git pull --rebase` under rebase.autoStash: an edit inside
+# that clone is stashed and replayed, so it survives until upstream touches the
+# same file and then comes back as a rebase conflict.
+
+# Path: stock agnoster prints all of %~, which in a deep tree pushes the git
+# segment past the right edge. %(4~|.../%3~|%~) is zsh's own conditional — four
+# or more components, print the last three behind an ellipsis, else print it
+# whole — so no subshell forks per prompt. Drops stock's AGNOSTER_GIT_INLINE
+# branch, which nothing here sets.
+prompt_dir() {
+  prompt_segment "$AGNOSTER_DIR_BG" "$AGNOSTER_DIR_FG" '%(4~|.../%3~|%~)'
+}
+
+# Type on line 2. Stock leaves the cursor on the same line as the segment bar,
+# which in a git repo is most of the terminal width.
+PROMPT='%{%f%b%k%}$(build_prompt)
+$ '
 
 # ── 6. Tool integrations ─────────────────────────────────────
 # Every line here is guarded, so a machine missing the tool loses the feature

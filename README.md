@@ -144,6 +144,15 @@ The agnoster segments — host, venv, path, git — and Claude Code's statusline
 values, so the prompt and the bar above it read as one unit. The zsh half is `.zshrc` §3; the
 other half is `statusline-agnoster.sh`.
 
+The theme itself is stock. Colours are twelve `AGNOSTER_*` variables agnoster reads as
+defaults, exported in §3 before it loads. The two things no variable reaches — a truncated
+path and typing on the second line — are a `prompt_dir` and a `PROMPT` redefined in §5, after
+oh-my-zsh sources the theme. **Nothing here edits the theme file**, because it lives in the
+vendored `~/.oh-my-zsh` clone: oh-my-zsh updates itself with `git pull --rebase` under
+`rebase.autoStash`, so an edit there is stashed and replayed — it survives while upstream
+leaves that file alone, then lands as a rebase conflict the first time upstream touches it.
+`./check.py clones` warns when one of those clones is dirty for that reason.
+
 That script's second line is a load gauge: model, effort, context percent, then the 5-hour and
 7-day rate-limit windows — the 5-hour with the time it resets, the 7-day with the weekday. Two details worth knowing:
 

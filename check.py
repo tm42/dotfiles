@@ -201,7 +201,17 @@ def check_clones():
         # A .git directory, not just any directory: a failed clone can leave an
         # empty tree behind, and a bare is_dir() would call that success forever.
         if (path / ".git").is_dir():
-            ok(name)
+            # Clean, not just present. oh-my-zsh updates itself with `git pull
+            # --rebase` under rebase.autoStash, so an edit inside one of these
+            # survives until upstream touches the same file and then lands as a
+            # conflict — the prompt lived in a modified agnoster.zsh-theme until
+            # 2026-09-01 and nothing said so.
+            d = subprocess.run(["git", "-C", str(path), "status", "--porcelain",
+                                "--untracked-files=no"], capture_output=True, text=True)
+            ok(name) if not d.stdout.strip() else \
+                warn(f"{name}: locally modified, and an update can conflict with it — "
+                     + " ".join(line.split(maxsplit=1)[1]
+                                 for line in d.stdout.strip().splitlines()))
         elif path.is_dir():
             bad(f"{name}: {tilde(path)} exists but is not a git clone — delete it and clone again")
         else:
