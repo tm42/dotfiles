@@ -67,7 +67,6 @@ dotfiles/
   nvim/    .config/nvim/{init.lua,lazy-lock.json,lua/**}
   claude/  .claude/statusline-agnoster.sh
   docs/    .nvimcheatsheet.md, .tmux-quickstart.md
-  uv/      .config/uv/uv.toml
 ```
 
 **The scope rule:** this repo is the terminal environment — zsh, tmux, nvim, and the tools
@@ -244,8 +243,8 @@ Two non-obvious habits:
 
 - **`uv … --help` prints live secrets.** uv renders environment defaults as `[env: VAR=<value>]`,
   so any `UV_*` secret in your environment leaks to scrollback, CI logs, or a screen share.
-  `uv/.config/uv/uv.toml` is one line — `keyring-provider = "subprocess"` — which is the fix:
-  use the system keychain rather than an exported variable for a credential used monthly.
+  Put `keyring-provider = "subprocess"` in your own `~/.config/uv/uv.toml` and use the system
+  keychain instead. Not shipped here — uv is not one of the tools this repo covers.
 - **`~/.claude/shell-snapshots/` freezes your shell environment at session start**, tokens
   included. Gitignored here; leave it that way.
 
