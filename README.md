@@ -234,7 +234,7 @@ tracked.
 credential patterns and fails the commit:
 
 ```bash
-uv tool install pre-commit && pre-commit install
+pre-commit install     # per clone — INSTALL.md step 8; git does not clone hooks
 ```
 
 Commit time is the only cheap moment. Git history is permanent — a credential that lands in a

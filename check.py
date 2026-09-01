@@ -44,6 +44,7 @@ TOOLS = {
     "node": "node",          # mason installs pyright and ts_ls from npm
     "tree-sitter-cli": "tree-sitter",   # the `tree-sitter` formula is the library
                                         # neovim depends on and ships no binary
+    "pre-commit": "pre-commit",
     "fzf-tab": None,
     "zsh-autosuggestions": None,
     "zsh-syntax-highlighting": None,
@@ -291,6 +292,13 @@ def check_repo():
             bad("gitleaks found something — run: gitleaks detect --source . --redact")
     else:
         warn("gitleaks not installed — the pre-commit hook fetches it on demand")
+
+    # git does not clone hooks, so a fresh clone has none and nothing says so.
+    # This is the only place that notices.
+    hook = REPO / ".git" / "hooks" / "pre-commit"
+    ok("pre-commit hook installed") if hook.is_file() else \
+        bad("no pre-commit hook — gitleaks never runs  (cd " + tilde(REPO)
+            + " && pre-commit install)")
 
 
 SECTIONS = {

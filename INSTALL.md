@@ -7,7 +7,7 @@ A program that runs twice and can delete your files is a bad trade.
 
 Read each step before running it. Every command here is one you can inspect first.
 
-Assumes macOS or Linux, Homebrew, and git. Steps 1–7 take about fifteen minutes.
+Assumes macOS or Linux, Homebrew, and git. Steps 1–10 take about twenty minutes.
 
 ---
 
@@ -25,7 +25,7 @@ the symlinks point at it, so moving it later breaks every one of them.
 
 ```sh
 brew install tmux neovim fzf fzf-tab zsh-autosuggestions zsh-syntax-highlighting \
-             zoxide bat jq ripgrep node tree-sitter-cli
+             zoxide bat jq ripgrep node tree-sitter-cli pre-commit
 brew install --cask font-jetbrains-mono-nerd-font
 ```
 
@@ -53,7 +53,7 @@ Three of those are easy to skip and all three matter:
   brew installs it anyway as a neovim dependency — it ships no binary. `nvim-treesitter`
   shells out to the CLI to build each parser, so without this formula `python`, `bash`,
   `json`, `yaml` and `toml` fall back to vim's regex highlighting and nvim says so once
-  per launch.
+  per launch. `pre-commit` is for step 8.
 
 ## 3. Clone the third-party pieces
 
@@ -199,7 +199,26 @@ genuinely empty.
 The closing `diff` shows exactly what changed. Read it before moving on — it should name
 `statusLine` and the two hook events and nothing else.
 
-## 8. First run
+## 8. The commit hook
+
+Skip only if you will never commit in this clone.
+
+```sh
+cd ~/punto
+pre-commit install          # brew installed pre-commit itself in step 2
+pre-commit run --all-files  # first run downloads each hook; about a minute
+```
+
+**Per clone, not per machine.** `pre-commit install` writes `.git/hooks/pre-commit`, and
+git does not clone hooks — a second clone of this repo starts with none, silently.
+
+gitleaks scans the staged diff against ~150 credential patterns and fails the commit. It
+is the only control here that catches a secret pasted into a file that is already tracked;
+`.gitignore` cannot, because the file is already in. Commit time is the cheap moment —
+git history is permanent, and a credential that lands in a commit is burned whatever a
+later commit removes.
+
+## 9. First run
 
 In order. Each step needs the one before it.
 
@@ -215,7 +234,7 @@ nvim                     # 3. lazy.nvim fetches its plugins, then mason fetches 
 
 `C-a` is the tmux prefix: hold Ctrl, tap `a`, release, then tap `I` (capital).
 
-## 9. Check
+## 10. Check
 
 ```sh
 ./check.py
