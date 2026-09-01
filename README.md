@@ -207,8 +207,10 @@ vendored `~/.oh-my-zsh` clone: oh-my-zsh updates itself with `git pull --rebase`
 leaves that file alone, then lands as a rebase conflict the first time upstream touches it.
 `./check.py clones` warns when one of those clones is dirty for that reason.
 
-That script's second line is a load gauge: model, effort, context percent, then the 5-hour and
-7-day rate-limit windows — the 5-hour with the time it resets, the 7-day with the weekday. Two details worth knowing:
+That script's second line is a load gauge: model, effort, and context percent. The 5-hour and
+7-day rate-limit windows are **not** shipped — they are your plan and your usage rather than a
+terminal setting, so they live in `~/.config/punto/statusline.sh` and
+`statusline.sh.example` says where to get them. Two details worth knowing:
 
 - **Context bands escalate earlier on a 1M window** (10/20/40% instead of 20/40/60%), because
   effective attention degrades long before the tokens fill.
@@ -221,6 +223,13 @@ That script's second line is a load gauge: model, effort, context percent, then 
 Hex colours need a truecolor terminal, and under tmux Claude Code additionally needs
 `CLAUDE_CODE_TMUX_TRUECOLOR=1` (`.zshrc` §3), or it clamps 24-bit to the 256 cube and the
 palette collapses into itself.
+
+The bar takes one local addition, the same way `.zshrc` takes `~/.zshrc.local`: if
+`~/.config/punto/statusline.sh` exists it is **sourced** just before the closing arrow, so
+it inherits `$input`, the palette and `$PREV_FG`. Print a segment, set `PREV_FG` to your own
+background, and the bar closes on your colour. That is where a work laptop's spend segment
+belongs — per machine, never in a public repo. It runs on every render, so anything reaching
+the network there stalls the bar; cache to a file and read the file.
 
 ### The agents tell you when they need you, in one vocabulary
 
@@ -293,6 +302,7 @@ disciplinary. Three files are read at shell startup and none is committed:
 |---|---|---|
 | `~/.config/secrets/secrets.zsh` | API keys and tokens, mode 600 | you |
 | `~/.config/punto/machine.zsh` | per-machine paths | you, from `machine.zsh.example` (INSTALL.md step 6) |
+| `~/.config/punto/statusline.sh` | per-machine statusline segments | you, from `statusline.sh.example`; optional |
 | `~/.zshrc.local` | anything else this one machine needs | you, if ever |
 
 A token has no *reason* to live in a tracked file — that is the actual protection. `.gitignore`

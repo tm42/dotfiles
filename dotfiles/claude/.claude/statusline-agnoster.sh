@@ -1,11 +1,13 @@
 #!/bin/bash
-# shellcheck disable=SC2059,SC1083,SC2001
+# shellcheck disable=SC2059,SC1083,SC2001,SC1091
 #   SC2059 (variables in a printf format string): every one of these formats is
 #     built from ANSI colour escapes, which contain no % — and line 231 relies on
 #     printf interpreting \x escapes, so a blanket '%s' rewrite would break it.
 #   SC1083 (literal brace): @{upstream} is git revision syntax, not an expansion.
 #   SC2001 (sed for a simple replacement): the sed reads better than the
 #     parameter-expansion form and runs once per prompt, not in a loop.
+#   SC1091 (cannot follow the source): the local segment file is per machine and
+#     deliberately not in this repo, so there is nothing here to follow.
 
 # Agnoster-style status line for Claude Code
 # With proper powerline arrows between segments
@@ -252,78 +254,32 @@ fi
 # Arrow: previous → ctx
 ctx_label="${percent}%"; [ -z "$percent" ] && ctx_label="?"
 printf "${CTX_BG}${PREV_FG}${SEP}${CTX_TEXT} ctx: %s " "$ctx_label"
-
-# Rate-limit segments: % used + when the window resets.
-# Showing % (static between renders) rather than time-remaining (decays silently
-# while statusline isn't re-rendered). Both absent for non-Pro/Max or pre-first-response.
-session_used=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty' | cut -d'.' -f1)
-session_reset=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty')
-week_used=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty' | cut -d'.' -f1)
-week_reset=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // empty')
-
-# Gold ramp — 5-hour segment. Pale cream to deep amber, so filling the window reads
-# as warming up. Yellow against the week segment blue is the widest hue separation
-# available while keeping every background light enough for black text.
-# 230 is also the git-dirty background, but the two segments sit at opposite ends
-# of the bar and git-dirty is transient, so the collision is accepted.
-BG_GOLD1="\033[48;2;244;234;213m"; FG_GOLD1="\033[38;2;244;234;213m"  # #f4ead5  <25%
-BG_GOLD2="\033[48;2;238;212;165m"; FG_GOLD2="\033[38;2;238;212;165m"  # #eed4a5  25-49%
-BG_GOLD3="\033[48;2;234;185;101m"; FG_GOLD3="\033[38;2;234;185;101m"  # #eab965  50-74%
-BG_GOLD4="\033[48;2;235;154;23m";  FG_GOLD4="\033[38;2;235;154;23m"   # #eb9a17  >=75%
-
-# Blue ramp — week segment. Same 25/50/75 thresholds as gold, same pale-to-deep
-# movement, so the two bars are read the same way and differ only in hue.
-# 75 is about as deep as this can go and still take black text comfortably.
-BG_ICE1="\033[48;2;217;239;244m"; FG_ICE1="\033[38;2;217;239;244m"  # #d9eff4  <25%
-BG_ICE2="\033[48;2;180;222;237m"; FG_ICE2="\033[38;2;180;222;237m"  # #b4deed  25-49%
-BG_ICE3="\033[48;2;137;201;233m"; FG_ICE3="\033[38;2;137;201;233m"  # #89c9e9  50-74%
-BG_ICE4="\033[48;2;97;179;234m";  FG_ICE4="\033[38;2;97;179;234m"   # #61b3ea  >=75%
-
-pick_color() {
-    local pct=$1
-    if   [ "$pct" -lt 25 ]; then echo "$BG_GOLD1|$FG_GOLD1"
-    elif [ "$pct" -lt 50 ]; then echo "$BG_GOLD2|$FG_GOLD2"
-    elif [ "$pct" -lt 75 ]; then echo "$BG_GOLD3|$FG_GOLD3"
-    else                         echo "$BG_GOLD4|$FG_GOLD4"
-    fi
-}
-
-pick_color_ice() {
-    local pct=$1
-    if   [ "$pct" -lt 25 ]; then echo "$BG_ICE1|$FG_ICE1"
-    elif [ "$pct" -lt 50 ]; then echo "$BG_ICE2|$FG_ICE2"
-    elif [ "$pct" -lt 75 ]; then echo "$BG_ICE3|$FG_ICE3"
-    else                         echo "$BG_ICE4|$FG_ICE4"
-    fi
-}
-
 PREV_FG="$CTX_FG"
 
-# Format an epoch second. BSD date reads -r as seconds-since-epoch; GNU coreutils
-# reads -r as a FILE to take the timestamp from, so it errors and the segment
-# renders " 47% >> " with nothing after the arrow. Probe once rather than guess,
-# the same way sessionizer.sh probes ls.
-if date -r 0 "+%H" >/dev/null 2>&1; then
-    epoch_fmt() { date -r "$1" "+$2"; }          # BSD / macOS
-else
-    epoch_fmt() { date -d "@$1" "+$2"; }         # GNU
-fi
-
-if [ -n "$session_used" ] && [ -n "$session_reset" ]; then
-    session_when=$(epoch_fmt "$session_reset" "%H:%M")
-    IFS='|' read -r S_BG S_FG <<< "$(pick_color "$session_used")"
-    printf "${S_BG}${PREV_FG}${SEP}${BLACK} %d%% >> %s " "$session_used" "$session_when"
-    PREV_FG="$S_FG"
-fi
-
-if [ -n "$week_used" ] && [ -n "$week_reset" ]; then
-    # Weekly window resets on a fixed weekday — show that (lowercase 3-letter)
-    # rather than the date, which carries no extra signal. macOS date has no
-    # lowercase token, so %a ("Mon") is piped through tr.
-    week_when=$(epoch_fmt "$week_reset" "%a" | tr '[:upper:]' '[:lower:]')
-    IFS='|' read -r W_BG W_FG <<< "$(pick_color_ice "$week_used")"
-    printf "${W_BG}${PREV_FG}${SEP}${BLACK} %d%% >> %s " "$week_used" "$week_when"
-    PREV_FG="$W_FG"
+# ── Local segments ───────────────────────────────────────────
+# Last word before the bar closes, for anything this machine needs that a public
+# repo should not carry — a work cost tracker, a deploy target, a ticket number.
+# Same idea as ~/.zshrc.local, and the same place as machine.zsh, because a
+# segment like that is per-machine rather than per-user.
+#
+# Sourced, not executed, so it inherits everything above: $input (the raw hook
+# JSON), the whole palette, and $PREV_FG. The powerline contract is two lines —
+# print your segment starting with $PREV_FG's arrow, then set $PREV_FG to your
+# own background's foreground code, so the closing arrow below matches whatever
+# ended up last:
+#
+#     printf "${BG_SEAFOAM}${PREV_FG}${SEP}${BLACK} \$%s " "$cost"
+#     PREV_FG="$FG_SEAFOAM"
+#
+# The one real trap: this runs on every render, so anything that touches the
+# network here stalls the bar. Cache to a file and read the file.
+#
+# Failure is mild, which is the reason this is a source and not a subshell. A
+# syntax error aborts the source and the bar renders exactly as it ships; an
+# `exit` ends the script here, costing the closing arrow and nothing else. Both
+# measured. Neither blanks the bar.
+if [ -f "$HOME/.config/punto/statusline.sh" ]; then
+    . "$HOME/.config/punto/statusline.sh"
 fi
 
 printf "${RESET}${PREV_FG}${SEP}${RESET}"

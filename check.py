@@ -31,6 +31,7 @@ REPO = Path(__file__).resolve().parent
 PKGROOT = REPO / "dotfiles"
 HOME = Path.home()
 MACHINE = HOME / ".config" / "punto" / "machine.zsh"
+STATUSLINE_LOCAL = HOME / ".config" / "punto" / "statusline.sh"
 CLAUDE_SETTINGS = HOME / ".claude" / "settings.json"
 CODEX_CONFIG = HOME / ".codex" / "config.toml"
 
@@ -259,6 +260,7 @@ def check_machine():
         warn("secrets.zsh absent (fine if this machine needs no API keys)")
 
 
+
 def check_claude():
     say("Claude Code")
     if not CLAUDE_SETTINGS.is_file():
@@ -272,6 +274,13 @@ def check_claude():
     if not isinstance(s, dict):
         bad("settings.json is not a JSON object")
         return
+
+    # Optional, and its absence is the normal case — so this only ever says it is
+    # there. Worth saying: the statusline sources it, so a bar carrying a segment
+    # nothing in this repo explains has exactly one other source. Reported here
+    # rather than in check_machine, which returns early on three paths.
+    if STATUSLINE_LOCAL.is_file():
+        ok(f"{tilde(STATUSLINE_LOCAL)} present — the statusline sources it")
 
     live = (s.get("statusLine") or {}).get("command")
     if live == STATUSLINE_CMD:

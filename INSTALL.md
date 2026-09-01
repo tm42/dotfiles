@@ -158,6 +158,12 @@ is a guess and the project picker (`M-o`) is useless until it is right. The file
 gitignored and never committed; it and `~/.config/secrets/secrets.zsh` are where anything
 machine-specific or secret belongs.
 
+`~/.config/punto/statusline.sh` is optional and lives in the same place for the same
+reason. If it exists, step 7's statusline sources it just before it closes the bar, so a
+segment only this machine should have — spend on a work laptop, which account is logged in
+— goes there rather than into a public repo. `statusline.sh.example` has the contract and
+three worked segments; skip it entirely and the bar is exactly as it ships.
+
 ## 7. Point Claude Code at the statusline (skip if you do not use it)
 
 Two keys in `~/.claude/settings.json`, and only two. Everything else in that file —

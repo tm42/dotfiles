@@ -3,8 +3,9 @@
 # the machine-local half of the split out, and to make the adjacency risk explicit.
 
 # ── The machine-local half ───────────────────────────────────
-# Created by hand during install and never committed. machine.zsh.example is.
+# Created by hand during install and never committed. The .example files are.
 machine.zsh
+statusline.sh
 
 # ── Credential files, by name ────────────────────────────────
 # None of these live under dotfiles/, so none can be reached by the symlink loop

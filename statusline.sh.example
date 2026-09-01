@@ -1,0 +1,70 @@
+# ── ~/.config/punto/statusline.sh ────────────────────────────
+# Copy to ~/.config/punto/statusline.sh. Never tracked, never overwritten by a
+# pull, per machine — the same deal as machine.zsh.
+#
+# statusline-agnoster.sh sources this as the last thing before it closes the
+# bar, so everything above is in scope: $input (the raw statusLine hook JSON),
+# every colour in the palette, and $PREV_FG.
+#
+# The powerline contract is two lines. Print your segment starting with the
+# previous segment's arrow, then set PREV_FG to your own background's foreground
+# code, so the closing arrow matches whatever ended up last:
+#
+#     printf "${BG}${PREV_FG}${SEP}${TEXT} content "
+#     PREV_FG="$FG"
+#
+# Skip the assignment and the bar closes in the wrong colour. Skip the whole
+# thing — print nothing, set nothing — and the bar is exactly as it ships.
+#
+# The trap: this runs on EVERY render. Anything touching the network here stalls
+# the bar for as long as it takes. Write to a cache file from a cron or a hook
+# and read the file here.
+#
+# Getting it wrong is cheap, though. A syntax error aborts the source and the bar
+# renders exactly as it ships; an `exit` ends the script there, costing the
+# closing arrow and nothing else. Both measured. Return early with an `if` all
+# the same — `exit` in a sourced file reads like a bug to whoever finds it next.
+#
+# In scope: $input, $PREV_FG, $SEP, $BLACK, $PAPER, $RESET, and every palette
+# defined above the source point — the identity colours (statusline-agnoster.sh
+# :24-41), the line-2 ladder BG_MODEL / BG_EFFORT / BG_CHERRY, and the ctx band
+# pastels BG_LAVENDER / BG_SEAFOAM / BG_BUTTER / BG_SALMON with their FG_ twins.
+#
+# A ramp of your own is four hex triples and belongs here rather than in the
+# repo. Keep every background light enough to take $BLACK, which is what every
+# segment on this bar uses for ink.
+
+# ── Spend, from a cache file ─────────────────────────────────
+# Cost matters on a work machine and nowhere else, which is why it is here and
+# not in the repo. The cache is written elsewhere; this only reads it, because
+# anything reaching the network from this file stalls the bar on every render.
+# BG_AMBER="\033[48;2;238;212;165m"; FG_AMBER="\033[38;2;238;212;165m"  # #eed4a5
+# if [ -f "$HOME/.cache/claude-spend" ]; then
+#     spend=$(cat "$HOME/.cache/claude-spend")
+#     printf "${BG_AMBER}${PREV_FG}${SEP}${BLACK} \$%s " "$spend"
+#     PREV_FG="$FG_AMBER"
+# fi
+
+# ── This session's own cost, straight from the payload ───────
+# No cache needed: Claude Code puts it in the hook JSON.
+# cost=$(echo "$input" | jq -r '.cost.total_cost_usd // empty')
+# if [ -n "$cost" ]; then
+#     printf "${BG_SEAFOAM}${PREV_FG}${SEP}${BLACK} \$%.2f " "$cost"
+#     PREV_FG="$FG_SEAFOAM"
+# fi
+
+# ── Which account is logged in ───────────────────────────────
+# A segment that says "work" on the work laptop and nothing anywhere else.
+# printf "${BG_LAVENDER}${PREV_FG}${SEP}${BLACK} acme " ; PREV_FG="$FG_LAVENDER"
+
+# ── The rate-limit gauges ────────────────────────────────────
+# The 5-hour and 7-day windows used to be in the repo and are now here, because
+# they are your plan and your usage rather than a terminal setting. If you want
+# them, take them from this repo's history:
+#
+#     git show 4bec6ea:dotfiles/claude/.claude/statusline-agnoster.sh \
+#       | sed -n '258,329p' >> ~/.config/punto/statusline.sh
+#
+# Line numbers rather than a pattern, because the block holds four `fi`s and any
+# range ending at one stops two thirds of the way through. Delete the
+# PREV_FG="$CTX_FG" line it carries — the repo sets that itself now.
