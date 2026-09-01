@@ -25,11 +25,22 @@ the symlinks point at it, so moving it later breaks every one of them.
 
 ```sh
 brew install tmux neovim fzf fzf-tab zsh-autosuggestions zsh-syntax-highlighting \
-             zoxide bat jq ripgrep node
+             zoxide bat jq ripgrep node tree-sitter-cli
 brew install --cask font-jetbrains-mono-nerd-font
 ```
 
-Two of those are easy to skip and both matter:
+You also need a C compiler and `make`, which nvim shells out to. Both come with Xcode
+Command Line Tools on macOS, which Homebrew already required, so a Mac that can run the
+line above has them. On Linux, install `build-essential` (or your distribution's
+equivalent). Check:
+
+```sh
+for t in cc make tree-sitter; do
+  command -v "$t" >/dev/null && echo "ok   $t" || echo "FAIL $t"
+done
+```
+
+Three of those are easy to skip and all three matter:
 
 - **The font is not optional.** The prompt separators, the Claude statusline arrows, the
   git branch glyph and every nvim file icon are Private Use Area characters. Without a
@@ -38,6 +49,11 @@ Two of those are easy to skip and both matter:
 - **`node`** is there because nvim's mason installs `pyright` and `typescript-language-server`
   from npm. Without it those two silently fail while the other two language servers work,
   which is more confusing than all four failing.
+- **`tree-sitter-cli`, not `tree-sitter`.** The `tree-sitter` formula is the library, and
+  brew installs it anyway as a neovim dependency — it ships no binary. `nvim-treesitter`
+  shells out to the CLI to build each parser, so without this formula `python`, `bash`,
+  `json`, `yaml` and `toml` fall back to vim's regex highlighting and nvim says so once
+  per launch.
 
 ## 3. Clone the third-party pieces
 

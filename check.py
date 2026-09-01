@@ -42,6 +42,8 @@ TOOLS = {
     "jq": "jq",
     "ripgrep": "rg",
     "node": "node",          # mason installs pyright and ts_ls from npm
+    "tree-sitter-cli": "tree-sitter",   # the `tree-sitter` formula is the library
+                                        # neovim depends on and ships no binary
     "fzf-tab": None,
     "zsh-autosuggestions": None,
     "zsh-syntax-highlighting": None,
