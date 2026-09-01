@@ -109,38 +109,58 @@ done
 Read the output before continuing.
 
 - `new` — nothing there, the link is free.
-- `FILE` — a real file that step 5 will replace. Save anything you want to keep.
-- `LINK` — already a symlink. Check where it points. **If it points into another repo,
-  stop and look at that repo first.**
-- `PARENT` — **stop.** A directory on the way to this file is a symlink into somewhere
-  else, so step 5 would not write into `$HOME` at all: it would reach through the link and
+- `FILE` — a real file. Step 5 moves it to `~/punto-backup/<timestamp>/` before linking, so
+  your aliases survive; this is your chance to see which files that will be.
+- `LINK` — already a symlink. Check where it points. Step 5 replaces it and prints the old
+  target, but a symlink is not backed up — **if it points into another repo, stop and look
+  at that repo first.**
+- `PARENT` — a directory on the way to this file is a symlink into somewhere else, so a
+  plain `ln` would not write into `$HOME` at all: it would reach through the link and
   replace a real file in that other checkout. `ln -sfn`'s `-n` does not help here — it
-  guards a symlink named as the target itself, never one in a parent component. Move or
-  remove the parent symlink before continuing.
-
-Move anything you want to keep:
-
-```sh
-mkdir -p ~/punto-backup
-# for each FILE you care about:
-mv ~/.zshrc ~/punto-backup/
-```
+  guards a symlink named as the target itself, never one in a parent component. Step 5
+  refuses these and names them; move or remove the parent symlink and re-run it to pick
+  the file up.
 
 ## 5. Link
 
 ```sh
 cd ~/punto
+bk=~/punto-backup/$(date +%Y%m%dT%H%M%S)
 for pkg in dotfiles/*/; do
   (cd "$pkg" && find . -type f ! -name '.DS_Store' | sed 's|^\./||') | while read -r rel; do
+    d=$(dirname "$rel")
+    while [ "$d" != "." ]; do
+      [ -L "$HOME/$d" ] && { echo "SKIP  $rel — parent $d is a symlink"; continue 2; }
+      d=$(dirname "$d")
+    done
+    if [ -L "$HOME/$rel" ]; then
+      old=$(readlink "$HOME/$rel")
+      [ "$old" = "$PWD/$pkg$rel" ] || echo "relink $rel (was -> $old)"
+    elif [ -e "$HOME/$rel" ]; then
+      mkdir -p "$bk/$(dirname "$rel")" && mv "$HOME/$rel" "$bk/$rel" && echo "saved  $rel -> $bk/$rel"
+    fi
     mkdir -p "$(dirname "$HOME/$rel")"
     ln -sfn "$PWD/$pkg$rel" "$HOME/$rel"
   done
 done
 ```
 
-What it does: for every file in every package, make the matching path in `$HOME` a
-symlink pointing at the repo copy. `-f` replaces what is there — which is why step 4
-comes first. `-n` stops it writing *inside* a directory symlink rather than replacing it.
+For every file in every package, make the matching path in `$HOME` a symlink pointing at
+the repo copy. Three things happen before each link, and each one is a way this step used
+to be able to destroy something:
+
+- **A real file is moved to `$bk` first**, so `~/.zshrc` and its aliases end up in
+  `~/punto-backup/<timestamp>/.zshrc` rather than gone. The directory is created only when
+  something is actually saved, and re-running the step makes no empty ones.
+- **A symlinked parent is refused**, because `ln -sfn`'s `-n` guards only a symlink named
+  as the target itself. Without this test, a `~/.config/nvim` pointing at another checkout
+  means the loop replaces a file in *that* repo, outside `$HOME`.
+- **An existing symlink is replaced and its old target printed.** Nothing is saved — the
+  link is one line of output and that output is all you get, so read it.
+
+Re-running is safe: an already-correct link prints nothing and is relinked to the same
+path. Only the parent-symlink `SKIP`s need action, and the file they name stays unlinked
+until you clear the parent and run the step again.
 
 Editing `~/.zshrc` now edits the repo file. That is the point: `git diff` shows your
 change immediately and there is no copy-back step to forget.
@@ -385,5 +405,5 @@ done
 Only removes symlinks — `[ -L ]` means a real file you created later is left alone. That
 loop takes `~/.codex/hooks.json` with it, but not the `[tui]` block you added by hand to
 `~/.codex/config.toml`; delete that yourself or Codex keeps publishing a title nothing
-reads. Then restore whatever you saved in step 4, and put `~/.claude/settings.json.bak`
-back to undo step 7.
+reads. Then copy back whatever step 5 saved in `~/punto-backup/<timestamp>/`, and put
+`~/.claude/settings.json.bak` back to undo step 7.

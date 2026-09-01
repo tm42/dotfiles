@@ -54,8 +54,10 @@ The real file lives in the repo; `$HOME` gets a signpost pointing at it.
 
 So editing `~/.zshrc` *is* editing the repo file — `git diff` shows it immediately, and there
 is no "remember to copy it back" step to forget, and `git pull` updates your live config with
-no install step at all. GNU Stow is the usual tool for this; INSTALL.md uses a plain `ln -s`
-loop instead, so there is nothing to install before you can install.
+no install step at all. GNU Stow is the usual tool for this; INSTALL.md uses an `ln -s`
+loop instead, so there is nothing to install before you can install. That loop moves any
+real file it would replace into `~/punto-backup/<timestamp>/` and refuses to write through
+a symlinked parent directory into someone else's checkout.
 
 Each package is a directory under `dotfiles/` whose contents mirror `$HOME`:
 
