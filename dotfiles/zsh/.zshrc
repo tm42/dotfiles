@@ -66,7 +66,8 @@ export CLAUDE_CODE_TMUX_TRUECOLOR=1
 # truecolor terminal; under tmux that also needs CLAUDE_CODE_TMUX_TRUECOLOR above
 # for Claude Code's own rendering, though the prompt itself is unaffected by it.
 
-# user@host — identity family, lightest
+# user@host — identity family, lightest. Drawn only over SSH or as another
+# user; see the prompt_context override in §5.
 export AGNOSTER_CONTEXT_BG='#6b9daf'
 export AGNOSTER_CONTEXT_FG='#0d0d0d'
 
@@ -121,6 +122,19 @@ plugins=(git you-should-use zsh-bat)
 # branch, which nothing here sets.
 prompt_dir() {
   prompt_segment "$AGNOSTER_DIR_BG" "$AGNOSTER_DIR_FG" '%(4~|.../%3~|%~)'
+}
+
+# Identity: only when it is not the obvious one. Stock hides user@host when
+# $USERNAME matches $DEFAULT_USER, a variable it never sets, so the segment
+# always drew. It also tests $SSH_CLIENT alone, which tmux does not carry into a
+# pane — update-environment's default lists SSH_CONNECTION, not SSH_CLIENT — so
+# stock would hide it in a remote tmux, the one place it is worth the width.
+DEFAULT_USER=${DEFAULT_USER:-$USER}
+prompt_context() {
+  if [[ $UID -eq 0 || $USERNAME != $DEFAULT_USER || -n $SSH_CONNECTION || -n $SSH_TTY ]]; then
+    prompt_segment "$AGNOSTER_CONTEXT_BG" "$AGNOSTER_CONTEXT_FG" \
+      "%(!.%{%F{$AGNOSTER_STATUS_ROOT_FG}%}.)%n@%m"
+  fi
 }
 
 # Virtualenv: stock gates its segment on VIRTUAL_ENV_DISABLE_PROMPT, exported by
