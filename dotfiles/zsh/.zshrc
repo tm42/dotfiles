@@ -174,4 +174,15 @@ claudea() {
 
 # ── 11. Local overrides ──────────────────────────────────────
 # Last word, for anything this machine needs that the repo should not carry.
-[[ -f ~/.zshrc.local ]] && source ~/.zshrc.local
+#
+# An `if`, not `[[ -f … ]] && source …`. This is the last line in the file, so
+# its status is what the first prompt sees, and the && form exits 1 when the
+# file is absent — which is every machine that has just run INSTALL.md. agnoster
+# then paints its red retval segment on the first prompt of every new shell,
+# reporting an error that refers to nothing. A false `if` exits 0.
+#
+# Deliberately no trailing `true`: if ~/.zshrc.local itself ends in something
+# that failed, the ✘ is earned and worth seeing.
+if [[ -f ~/.zshrc.local ]]; then
+  source ~/.zshrc.local
+fi
