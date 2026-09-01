@@ -170,6 +170,10 @@ alone.
 # twice cannot overwrite the pristine copy the undo in "Uninstalling" depends on.
 [ -f ~/.claude/settings.json ] || echo '{}' > ~/.claude/settings.json
 cp -n ~/.claude/settings.json ~/.claude/settings.json.bak
+# The transform reads your CURRENT settings, never the backup: .bak is a first-run
+# snapshot, so re-running this a year later with .bak as input would roll back every
+# setting you changed in between. .prev is just this run's before-picture for the diff.
+cp    ~/.claude/settings.json ~/.claude/settings.json.prev
 
 jq '
   def rewire($e): .hooks[$e] = (
@@ -180,11 +184,12 @@ jq '
           "command": "$HOME/.tmux/claude-notify.sh"}]}]);
   .statusLine = {"type": "command", "command": "~/.claude/statusline-agnoster.sh"}
   | rewire("Notification") | rewire("Stop")
-' ~/.claude/settings.json.bak > ~/.claude/settings.json.tmp \
+' ~/.claude/settings.json.prev > ~/.claude/settings.json.tmp \
   && mv ~/.claude/settings.json.tmp ~/.claude/settings.json \
   || rm -f ~/.claude/settings.json.tmp
 
-diff <(jq -S . ~/.claude/settings.json.bak) <(jq -S . ~/.claude/settings.json)
+diff <(jq -S . ~/.claude/settings.json.prev) <(jq -S . ~/.claude/settings.json)
+rm -f ~/.claude/settings.json.prev
 ```
 
 `rewire` strips any existing `claude-notify.sh` **hook** before adding the current one, so
@@ -197,7 +202,9 @@ out with it. `map(select((.hooks | length) > 0))` then removes an entry only onc
 genuinely empty.
 
 The closing `diff` shows exactly what changed. Read it before moving on — it should name
-`statusLine` and the two hook events and nothing else.
+`statusLine` and the two hook events and nothing else. On a re-run it prints nothing at
+all, which is the correct result: the two keys are already what this step sets them to,
+and everything you changed since is left where it is.
 
 ## 8. The commit hook
 
