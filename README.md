@@ -150,6 +150,7 @@ config matched for do not exist.
 | `Action Required` | its title | `PermissionRequest` hook |
 | `Ready` | `Stop` hook — **not** its title | `Stop` and `Notification` hooks |
 | idle | visiting the pane clears `Ready` | visiting the pane clears `Ready` |
+| interrupted | its title | screen unchanged for 30s clears `Working` |
 
 `Ready` is the row worth reading twice. Codex's title reports `Ready` for a turn that just
 ended *and* for a pane nobody has touched since yesterday, so the title alone cannot tell
@@ -198,6 +199,13 @@ Both notices — that one and an agent's — are drawn by `status-tick.sh` at th
 status bar, ahead of git and the clock, not by `display-message`, whose timeout tmux cancels on your next keystroke: a
 notice about window 4 used to die because you typed in window 1. This one goes when you
 reach the pane it names, or after 30s. Only the newest is shown.
+
+The same script is what makes `Working` honest. State is latched by hooks, and Claude fires
+none when a turn is interrupted with Esc or killed, so the latch outlives the turn. A
+working pane redraws, though: measured against a real turn, no two consecutive 3s samples of
+its screen matched while it streamed, and it held one value from the moment Esc landed. So a `Working` pane whose
+screen has not changed for 30s loses the state — held through 31s of streaming and cleared
+28s after the interrupt, in the run that decided the threshold.
 
 ### Prompt and Claude statusline are one bar
 
