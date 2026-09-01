@@ -65,7 +65,11 @@ _ps_precmd() {
   local cmd=${${(f)"$(tmux show -pv -t "$TMUX_PANE" @ps_cmd 2>/dev/null)"}//\#/\#\#}
   local glyph='✔'
   (( code )) && glyph="✘$code"
-  tmux display-message -d 4000 " $glyph  w${info#*|}  ${cmd:0:48}  $dur " 2>/dev/null
+  # Not display-message; see the header of status-tick.sh.
+  tmux set -g @notice " $glyph  w${info#*|}  ${cmd:0:48}  $dur " \; \
+       set -g @notice_pane "$TMUX_PANE" \; \
+       set -g @notice_at "$EPOCHSECONDS" \; \
+       refresh-client -S 2>/dev/null
 }
 
 add-zsh-hook preexec _ps_preexec
