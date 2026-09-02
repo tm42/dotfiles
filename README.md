@@ -158,7 +158,7 @@ session has a name. `/rename` inside opencode is what sets it.
 | State | Codex | Claude | opencode |
 |---|---|---|---|
 | `Working` | its title | `UserPromptSubmit` hook | `UserPromptSubmit`, from `message.updated` |
-| `Action Required` | its title | `PermissionRequest` hook | `PermissionRequest`, from `permission.asked` |
+| `Action Required` | its title | `PermissionRequest` hook | `PermissionRequest`, from `permission.asked` or `question.asked` |
 | `Ready` | `Stop` hook — **not** its title | `Stop` and `Notification` hooks | `Stop`, from `session.idle` |
 | idle | visiting the pane clears `Ready` | visiting the pane clears `Ready` | visiting the pane clears `Ready` |
 | interrupted | its title | screen unchanged for 30s clears `Working` | screen unchanged for 30s clears `Working` |

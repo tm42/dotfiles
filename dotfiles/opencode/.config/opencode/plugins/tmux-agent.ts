@@ -111,6 +111,33 @@ export const TmuxAgentPlugin: Plugin = async ({ $, directory }) => {
           await notify("PermissionRequest", session, props?.action)
           break
 
+        // A question is not a permission. opencode has two ways to block on you and
+        // they share no event: a permission asks whether a tool may run, a question
+        // asks you to pick from options, and the log calls them per_ and que_. Both
+        // leave the pane unable to move until you answer, so both are wait — without
+        // this a question sat in the tab as "Working" and the freeze sweep in
+        // status-tick.sh then retired even that after 30s of an unchanging screen,
+        // leaving no state at all on the one pane that wanted you. Measured on
+        // 1.18.20: question.asked, then question.replied when you choose and
+        // question.rejected on Esc. Both spellings carry the same properties, unlike
+        // the permission pair, so one case list covers them.
+        // .header over .question because opencode declares it "very short label (max
+        // 30 chars)" and the notice has 40 to spend on a verb; the first of several
+        // questions stands for all of them, which is what the tab has room for.
+        case "question.asked":
+        case "question.v2.asked":
+          await notify("PermissionRequest", session, props?.questions?.[0]?.header)
+          break
+
+        // Rejecting a question is still an answer: the tool returns the refusal and
+        // the turn carries on, so the pane goes back to Working either way.
+        case "question.replied":
+        case "question.rejected":
+        case "question.v2.replied":
+        case "question.v2.rejected":
+          await notify("UserPromptSubmit", session)
+          break
+
         // Back to Working the moment you answer. Claude and Codex have no event
         // for this, so their "Action Required" stands until the turn ends — a
         // bounded lie this one does not have to tell, because answering is

@@ -341,10 +341,12 @@ silently.
 
 The plugin builds the same JSON payload Claude Code and Codex deliver on stdin and pipes it
 into `~/.tmux/agent-notify.sh`, so the state word, the notice, the collapse past one pending
-notice and `AGENT_NOTIFY_BANNER` all work the same way. Four moments reach it: the message
-you send, a permission request, your answer to it, and the session going idle. A permission
-notice names the permission opencode asked for — ` ◆  opencode w2.1  punto — bash ` — rather
-than the reason, which opencode does not put on the event the way Claude and Codex do.
+notice and `AGENT_NOTIFY_BANNER` all work the same way. Five kinds of moment reach it: the
+message you send, a permission request, a question with options, your answer to either, and
+the session going idle. A permission notice names the permission opencode asked for —
+` ◆  opencode w2.1  punto — bash ` — rather than the reason, which opencode does not put on
+the event the way Claude and Codex do; a question notice names the question's own short
+header, which opencode caps at 30 characters for exactly this kind of use.
 
 Start `opencode` inside tmux once. The tab should read `Working | <project>` while it works
 and `Ready | <project>` when it stops.
