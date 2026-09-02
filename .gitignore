@@ -55,6 +55,10 @@ id_ed25519*
 *.orig
 *~
 
+# Written by `python3 -m py_compile debug.py`, which is one of the checks the
+# contract declares, so this appears every time the module is verified.
+__pycache__/
+
 # ── OS and editor ────────────────────────────────────────────
 .DS_Store
 .idea/
@@ -65,3 +69,9 @@ id_ed25519*
 
 # review reports and team config — working notes, not part of the environment
 .flw/
+
+# the contract and the plans behind it — the same kind of working note, and the
+# reason it is not tracked is that a pull onto a machine being debugged should
+# carry the tool, not the reasoning that produced it
+specs/
+plans/
