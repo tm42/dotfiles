@@ -265,9 +265,19 @@ per turn it is a lot of banners. Turn it on in `~/.config/punto/machine.zsh` (st
 ```sh
 export AGENT_NOTIFY_BANNER=1        # macOS banner as well as the tmux strip
 export AGENT_NOTIFY_SOUND=Submarine # or "" for a silent banner
+export AGENT_NOTIFY_APP=iTerm       # only if your terminal sets no TERM_PROGRAM
 ```
 
 Outside tmux the banner is the only channel there is, so without it you get nothing.
+
+`AGENT_NOTIFY_APP` names your terminal, and only matters for the case where the agent's
+pane is the one on screen but the screen is not what you are looking at. There the status
+line has nothing to say — you would see it the moment you looked — so the banner is the
+only channel, and it fires unless the terminal is the frontmost application. The check is
+`lsappinfo`, which is macOS's own and prompts for no permission. The name comes from
+`$TERM_PROGRAM` with `.app` stripped, matched case-insensitively as a substring, so
+`iTerm.app` finds `iTerm2` on its own; set this only for a terminal that exports no
+`TERM_PROGRAM` at all, where the alternative is a banner every time.
 
 ## 8. Codex (skip if you do not use it)
 

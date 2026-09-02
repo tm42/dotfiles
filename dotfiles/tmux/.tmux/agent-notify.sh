@@ -104,7 +104,6 @@ if [[ -n ${TMUX_PANE:-} && -n ${TMUX:-} ]]; then
   fi
   tmux refresh-client -S
 
-  [[ $fg == 1 ]] && exit 0                # foreground — you can see it
   [[ -n $glyph ]] || exit 0               # a prompt you just typed is not news
 
   # Both agents put decoration in the pane title; only the name is worth showing.
@@ -134,15 +133,36 @@ if [[ -n ${TMUX_PANE:-} && -n ${TMUX:-} ]]; then
   # finishing at once erased the first with nothing to say it had. The pane that
   # owns the option is also the pane whose arrival clears it, so there is no
   # separate @notice_pane to keep in step.
-  tmux set -p -t "$TMUX_PANE" @notice_txt " $glyph  $agent w$idx  $nesc — $esc " \; \
-       set -p -t "$TMUX_PANE" @notice_name "$nesc" \; \
-       set -p -t "$TMUX_PANE" @notice_glyph "$glyph" \; \
-       set -p -t "$TMUX_PANE" @notice_at "$EPOCHSECONDS" \; \
-       refresh-client -S
+  if [[ $fg == 0 ]]; then
+    tmux set -p -t "$TMUX_PANE" @notice_txt " $glyph  $agent w$idx  $nesc — $esc " \; \
+         set -p -t "$TMUX_PANE" @notice_name "$nesc" \; \
+         set -p -t "$TMUX_PANE" @notice_glyph "$glyph" \; \
+         set -p -t "$TMUX_PANE" @notice_at "$EPOCHSECONDS" \; \
+         refresh-client -S
+  fi
 fi
 
 [[ -n ${AGENT_NOTIFY_BANNER:-} ]] || exit 0
 [[ -n $glyph ]] || exit 0
+
+# A visible pane earns no status notice — you would be looking at the bar as it
+# appeared. It still earns a banner whenever the terminal itself is not the
+# frontmost application, which is the case the old single `$fg == 1` exit
+# swallowed: the pane open, your eyes on another app, and nothing anywhere to
+# tell you. lsappinfo ships with macOS and needs no Automation permission,
+# unlike asking System Events for the frontmost process; measured at 9ms a call,
+# and only ever on this path. TERM_PROGRAM says "iTerm.app" where lsappinfo says
+# "iTerm2", so the two are matched case-insensitively as substrings with .app
+# stripped rather than compared. AGENT_NOTIFY_APP overrides it for a terminal
+# that sets no TERM_PROGRAM at all — an empty pattern raises the banner rather
+# than silencing it, because a banner too many is cheaper than one you needed.
+if [[ ${fg:-0} == 1 ]]; then
+  app=${AGENT_NOTIFY_APP:-${TERM_PROGRAM:-}}; app=${app%.app}
+  if [[ -n $app ]]; then
+    front=$(lsappinfo info -only name "$(lsappinfo front)" 2>/dev/null)
+    [[ $front == *(#i)${app}* ]] && exit 0
+  fi
+fi
 
 sound=${AGENT_NOTIFY_SOUND-Submarine}
 if [[ -n $sound ]]; then

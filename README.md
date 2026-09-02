@@ -268,7 +268,9 @@ on you outranks two that merely finished.
 
 The macOS banner is off until you export `AGENT_NOTIFY_BANNER` — at one per turn it is a
 lot of banners, and the tmux strip already says it where you are looking. Which also means
-that outside tmux you get nothing until you export it.
+that outside tmux you get nothing until you export it. When the pane *is* on screen but
+the terminal is not the frontmost app, the banner is the only channel that can reach you,
+so that is the one case where it fires for a foreground pane.
 
 ---
 
