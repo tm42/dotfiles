@@ -68,15 +68,25 @@ elif (( ${#pending} > 1 )); then
   # them will not fit beside git, the clock and the date, and the count is the
   # news. One cap on the joined list, since the per-name cap that ends at the
   # right width for one name is three times too wide for three.
+  # A name is empty when the payload carried no .cwd and the title stripped to
+  # nothing; it would print as a dangling ", " and a count that no longer matches
+  # what you can read.
   typeset -a names
   glyph='✳'
   for e in ${(On)pending}; do
-    rest=${e#*|}; names+=("${rest%|*}")
+    rest=${e#*|}; [[ -n ${rest%|*} ]] && names+=("${rest%|*}")
     [[ ${e##*|} == '◆' ]] && glyph='◆'
   done
-  list=${(j:, :)names}
-  (( ${#list} > 46 )) && list="${list[1,45]}…"
-  notice=" $glyph  ${#pending} agents  ·  $list "
+  # Counted from the names rather than from $pending, so the number always
+  # matches what you can read. A dropped empty name would otherwise leave
+  # "3 agents" beside two of them.
+  if (( ${#names} )); then
+    list=${(j:, :)names}
+    (( ${#list} > 46 )) && list="${list[1,45]}…"
+    notice=" $glyph  ${#names} agents  ·  $list "
+  else
+    notice=" $glyph  ${#pending} agents "
+  fi
 fi
 
 tmux list-panes -a -F '#{pane_id} #{@agent_state} #{@agent_screen} #{@agent_screen_at}' 2>/dev/null |
