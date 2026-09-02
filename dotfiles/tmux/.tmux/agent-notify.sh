@@ -31,11 +31,11 @@
 #             pane; `wait` survives, because an approval you have looked at and
 #             not answered is still an approval.
 #
-# Notification is deliberately NOT wait. Claude fires it both for a permission
-# prompt and after sitting idle ≥60s, and the second is the opposite of blocked
-# on you — it is precisely ready. Mapping both to wait pinned every Claude pane
-# you walked away from to "Action Required" forever, since visiting never clears
-# wait. PermissionRequest is the event that means only the one thing, so wait
+# Notification is deliberately NOT wait, and from Claude raises no notice. Claude fires
+# it both for a permission prompt and after sitting idle >=60s, and the second is
+# the opposite of blocked on you — it is precisely ready. Mapping both to wait
+# pinned every Claude pane you walked away from to "Action Required" forever,
+# since visiting never clears wait. PermissionRequest is the event that means only the one thing, so wait
 # comes from there; Notification then declines to downgrade an existing wait,
 # because Claude fires it 60s into a prompt that is still pending.
 #
@@ -68,8 +68,29 @@ case $event in
   PermissionRequest|Notification)
     verb=$(printf '%s' "$payload" | jq -r '
       .message // .tool_input.description // .tool_name // "waiting for input"')
-    if [[ $event == PermissionRequest ]]; then state=wait;  glyph='◆'
-    else                                       state=ready; glyph='◆'; soft=1; fi ;;
+    if [[ $event == PermissionRequest ]]; then
+      state=wait; glyph='◆'
+    else
+      state=ready; soft=1
+      # Claude's Notification is the one event that fires because nothing happened,
+      # which is why it is the only one that can repeat while you do nothing.
+      # Measured: a turn ended at 19:31:19, its notice aged out at the 30s HOLD, and
+      # at 19:32:19 — 60s to the second — Notification raised a fresh "◆ Claude is
+      # waiting for your input" on the same pane with a new @notice_at, on a turn
+      # that had already finished and been read. An empty glyph is this file's
+      # existing way to say "not news": it exits before the notice and before the
+      # banner, leaving the soft `ready` below. Nothing is lost, because Claude
+      # declares PermissionRequest too and that is the event that means it is
+      # actually blocked on you.
+      #
+      # Claude and no one else, because both halves of that argument are about
+      # Claude: its 60s idle timer, and its declaring PermissionRequest as well. An
+      # agent that sends this name for something that IS news would be silenced
+      # outright, and silently — every unrecognised event still reaches the bar
+      # through the fallback below, so this branch would be the only way to
+      # disappear. Anything but Claude keeps the ◆ it had.
+      if [[ $agent == claude ]]; then glyph=''; else glyph='◆'; fi
+    fi ;;
   UserPromptSubmit) state=working; glyph=''  ; verb='working' ;;
   Stop)             state=ready;   glyph='✳' ; verb='finished' ;;
   *)                state='';      glyph='·' ; verb=$event ;;

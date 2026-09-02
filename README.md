@@ -182,6 +182,17 @@ blocked on you. `PermissionRequest` is the event that means only the one thing. 
 then declines to overwrite an existing `Action Required`, since Claude fires it 60 seconds
 into a prompt that is still pending.
 
+From Claude it also raises no notice, which is the one place a state and a notice part
+company. Every
+other event reports a change, so every other event is news exactly once; this one reports
+that nothing has changed, and repeats for as long as nothing does. Sampled on a real pane: a
+turn ended at 19:31:19, its notice aged out after the usual 30 seconds, and at 19:32:19 —
+60 seconds to the second — `Notification` put the same pane back in the bar as
+` ◆  claude w1.1  flw — Claude is waiting for your input `, a fresh notice for a turn that
+had already finished and been read. Claude only: both halves of that argument are about
+Claude, and an agent that sent this event name for something that mattered would go silent
+with no other way to reach the bar, so every other agent keeps the notice it had.
+
 The pane border carries the same label, from the same two options — a tab can only ever
 speak for the active pane, so in a split window the other agent would otherwise show the
 border's `@ps_cmd`, which for an agent pane is frozen at `▶ codex` from the moment zsh's
