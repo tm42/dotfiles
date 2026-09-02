@@ -151,15 +151,27 @@ fi
 # swallowed: the pane open, your eyes on another app, and nothing anywhere to
 # tell you. lsappinfo ships with macOS and needs no Automation permission,
 # unlike asking System Events for the frontmost process; measured at 9ms a call,
-# and only ever on this path. TERM_PROGRAM says "iTerm.app" where lsappinfo says
-# "iTerm2", so the two are matched case-insensitively as substrings with .app
-# stripped rather than compared. AGENT_NOTIFY_APP overrides it for a terminal
-# that sets no TERM_PROGRAM at all — an empty pattern raises the banner rather
-# than silencing it, because a banner too many is cheaper than one you needed.
+# and only ever on this path.
+#
+# NOT $TERM_PROGRAM. tmux has overwritten it with "tmux" in every pane it spawns
+# since 3.2, and this gate only ever runs inside tmux, so the pattern was "tmux",
+# never matched "iTerm2", and silenced nothing: with the banner on, every turn
+# you sat and watched raised one. The server's own environment still holds what
+# the client that started it had. It goes stale if you later attach from a
+# different terminal application, which is what AGENT_NOTIFY_APP is for.
+#
+# The names then have to be reconciled, because none of the three sources agree:
+# TERM_PROGRAM says "iTerm.app" and "Apple_Terminal" where lsappinfo says "iTerm2"
+# and "Terminal". Stripping ".app" and a leading "Apple_" covers both, and the
+# match is a case-insensitive substring rather than an equality. Anything else —
+# VS Code calls itself "vscode" and shows as "Code" — needs AGENT_NOTIFY_APP.
+# An empty pattern raises the banner rather than silencing it, because a banner
+# too many is cheaper than one you needed.
 if [[ ${fg:-0} == 1 ]]; then
-  app=${AGENT_NOTIFY_APP:-${TERM_PROGRAM:-}}; app=${app%.app}
-  if [[ -n $app ]]; then
-    front=$(lsappinfo info -only name "$(lsappinfo front)" 2>/dev/null)
+  app=${AGENT_NOTIFY_APP:-$(tmux show-environment -g TERM_PROGRAM)}
+  app=${app#TERM_PROGRAM=}; app=${app%.app}; app=${app#Apple_}
+  if [[ -n $app && $app != tmux ]]; then
+    front=$(lsappinfo info -only name "$(lsappinfo front)")
     [[ $front == *(#i)${app}* ]] && exit 0
   fi
 fi
