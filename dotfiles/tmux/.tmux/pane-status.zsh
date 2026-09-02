@@ -47,9 +47,24 @@ _ps_precmd() {
   local state=ok
   (( code )) && state=err
 
+  # ✔/✘ is an acknowledgement the pane is owed, and a pane you were watching when
+  # the command finished has already been acknowledged. Only the after-select-pane
+  # hook in ~/.tmux.conf ever cleared it, and that fires on arrival, so a command
+  # run in the pane you never left sat in the tab as "✔ ls" until you switched away
+  # and came back. Same foreground test as agent-notify.sh and status-tick.sh,
+  # session_attached and all: the current pane of a session nobody is attached to
+  # is being read by nobody. The nudge below is the one test in the package that
+  # omits it, so in an unattached session a slow command keeps its badge and
+  # raises no nudge. `if -F` rather than a second `tmux display` keeps this to one tmux
+  # call; -t is required, or the format expands against the calling client's pane
+  # instead of this one. @ps_code and @ps_dur are set either way, because
+  # pane-border-format reads those and not @ps_state — the border still says
+  # "✔ ls  84ms" for the command you just watched.
   tmux set -p -t "$TMUX_PANE" @ps_code "$code" \; \
        set -p -t "$TMUX_PANE" @ps_dur "$dur" \; \
-       set -p -t "$TMUX_PANE" @ps_state "$state" \; \
+       if -F -t "$TMUX_PANE" '#{&&:#{session_attached},#{&&:#{pane_active},#{window_active}}}' \
+          "set -pu -t $TMUX_PANE @ps_state" \
+          "set -p -t $TMUX_PANE @ps_state $state" \; \
        refresh-client -S 2>/dev/null
 
   local -i thresh=${TMUX_PS_NOTIFY_SEC:-30}
