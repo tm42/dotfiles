@@ -14,7 +14,7 @@ Stdlib only, Python 3.9 — what macOS ships at /usr/bin/python3.
 
     ./check.py            check everything
     ./check.py links      just one section (links, tools, clones, machine,
-                          claude, codex, repo)
+                          claude, codex, opencode, repo)
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ MACHINE = HOME / ".config" / "punto" / "machine.zsh"
 STATUSLINE_LOCAL = HOME / ".config" / "punto" / "statusline.sh"
 CLAUDE_SETTINGS = HOME / ".claude" / "settings.json"
 CODEX_CONFIG = HOME / ".codex" / "config.toml"
+OPENCODE_PLUGIN = HOME / ".config" / "opencode" / "plugins" / "tmux-agent.ts"
 
 # Homebrew formulae the configs need. Formula → the command it provides, or None
 # when it ships a shell source with no binary (checked under share/ instead).
@@ -366,6 +367,34 @@ def check_codex():
              + " \u2014 the tab can never say Action Required for Codex")
 
 
+def check_opencode():
+    say("opencode")
+    if not shutil.which("opencode"):
+        warn("opencode not installed — skipping  (brew install opencode)")
+        return
+
+    # There is no config file to get wrong here: a plugin runs because it is in
+    # the directory, not because anything names it, and opencode asks for no
+    # approval the way Codex does. So the link is check_links's and the only thing
+    # left is whether the linked file still calls the notifier.
+    #
+    # The is_file() guard is not check_links twice over: `./check.py opencode`,
+    # which INSTALL.md step 9 tells you to run, does not run check_links, and
+    # read_text() below would raise without it.
+    #
+    # Matched on the assignment rather than anywhere in the file, because the
+    # header comment names the script too — a plugin that had lost the live
+    # `const NOTIFY` line still passed a plain substring test.
+    if not OPENCODE_PLUGIN.is_file():
+        bad(f"{tilde(OPENCODE_PLUGIN)} absent — see INSTALL.md step 9")
+    elif re.search(rf"^const NOTIFY\s*=.*{re.escape(NOTIFY_NAME)}",
+                   OPENCODE_PLUGIN.read_text(errors="replace"), re.M):
+        ok(f"plugin calls {NOTIFY_NAME}")
+    else:
+        bad(f"{tilde(OPENCODE_PLUGIN)} has no `const NOTIFY` naming {NOTIFY_NAME}"
+            " — opencode then sets no state and raises no notice")
+
+
 def check_repo():
     say("repo hygiene")
     r = subprocess.run(["git", "-C", str(REPO), "ls-files"],
@@ -402,6 +431,7 @@ SECTIONS = {
     "machine": check_machine,
     "claude": check_claude,
     "codex": check_codex,
+    "opencode": check_opencode,
     "repo": check_repo,
 }
 

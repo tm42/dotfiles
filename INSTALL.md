@@ -53,7 +53,7 @@ Three of those are easy to skip and all three matter:
   brew installs it anyway as a neovim dependency — it ships no binary. `nvim-treesitter`
   shells out to the CLI to build each parser, so without this formula `python`, `bash`,
   `json`, `yaml` and `toml` fall back to vim's regex highlighting and nvim says so once
-  per launch. `pre-commit` is for step 9.
+  per launch. `pre-commit` is for step 10.
 
 ## 3. Clone the third-party pieces
 
@@ -325,7 +325,52 @@ It wires `agent-notify.sh` to `PermissionRequest` and `Stop`, the same two momen
 wires for Claude. Then start `codex` once and run `/hooks` to review and trust it — Codex
 will not run a hook you have not approved, and says nothing when it skips one.
 
-## 9. The commit hook
+## 9. opencode (skip if you do not use it)
+
+`brew install opencode` if you have not already. One file, and step 5 already symlinked it:
+
+```sh
+ls -l ~/.config/opencode/plugins/tmux-agent.ts
+# -> ~/punto/dotfiles/opencode/.config/opencode/plugins/tmux-agent.ts
+```
+
+Nothing else to register and nothing to approve. opencode has no hooks file: every file in
+`~/.config/opencode/plugins/` is loaded at startup and subscribes to the event bus, which is
+the one place opencode is easier than Codex, where a hook you have not trusted is skipped
+silently.
+
+The plugin builds the same JSON payload Claude Code and Codex deliver on stdin and pipes it
+into `~/.tmux/agent-notify.sh`, so the state word, the notice, the collapse past one pending
+notice and `AGENT_NOTIFY_BANNER` all work the same way. Four moments reach it: the message
+you send, a permission request, your answer to it, and the session going idle. A permission
+notice names the permission opencode asked for — ` ◆  opencode w2.1  punto — bash ` — rather
+than the reason, which opencode does not put on the event the way Claude and Codex do.
+
+Start `opencode` inside tmux once. The tab should read `Working | <project>` while it works
+and `Ready | <project>` when it stops.
+
+**If the tab reads `▶ opencode` instead** — the command you typed, with a `▶` in front of it
+rather than a state word — the pane's command is not what `@agent_is` matches. Homebrew's
+`opencode` is a wrapper that execs a Bun-compiled `opencode.exe`, so the pane runs the second
+name and not the first; both are matched, but another install route may use a third. Check
+what it actually is, and add that to `@agent_is` in `dotfiles/tmux/.tmux.conf`:
+
+```sh
+tmux display -p '#{pane_current_command}'      # expect: opencode.exe, or opencode
+```
+
+**If the tab reads the project name and never a state word**, the plugin is not running. It
+disables itself outside tmux by design, so start opencode in a pane rather than a bare
+terminal window; if it already is one, `./check.py opencode`.
+
+The name in the tab is the session name, which opencode publishes in its pane title as
+`OC | <session>` and which `/rename` inside opencode sets. Until a session has one the title
+is a bare `OpenCode`, and the tab shows the pane's working directory instead — so a fresh
+pane reads `Ready | punto` and the same pane reads `Ready | notifications` once you have
+named the session. If you would rather it were always the directory, the one line to change
+is `@agent_name` in `dotfiles/tmux/.tmux.conf`.
+
+## 10. The commit hook
 
 Skip only if you will never commit in this clone.
 
@@ -344,7 +389,7 @@ is the only control here that catches a secret pasted into a file that is alread
 git history is permanent, and a credential that lands in a commit is burned whatever a
 later commit removes.
 
-## 10. First run
+## 11. First run
 
 In order. Each step needs the one before it.
 
@@ -360,7 +405,7 @@ nvim                     # 3. lazy.nvim fetches its plugins, then mason fetches 
 
 `C-a` is the tmux prefix: hold Ctrl, tap `a`, release, then tap `I` (capital).
 
-## 11. Check
+## 12. Check
 
 ```sh
 ./check.py

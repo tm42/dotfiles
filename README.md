@@ -69,6 +69,7 @@ dotfiles/
   nvim/    .config/nvim/{init.lua,lazy-lock.json,lua/**}
   claude/  .claude/statusline-agnoster.sh
   codex/   .codex/hooks.json
+  opencode/ .config/opencode/plugins/tmux-agent.ts
   docs/    .nvimcheatsheet.md, .tmux-quickstart.md
 ```
 
@@ -88,6 +89,13 @@ Codex is the same two seams and one file less: it draws its own status line, so 
 repo ships is `hooks.json`. Its `[tui].terminal_title` is added by hand rather than
 symlinked, because Codex writes per-project trust into `~/.codex/config.toml` and a
 symlink would put your local project paths into a public git history.
+
+opencode loads every file in `~/.config/opencode/plugins/` at startup, so `tmux-agent.ts` is
+the whole wiring and the link in step 5 is the whole install — nothing to register, nothing
+to approve. The plugin builds the same JSON payload the other two deliver on stdin and pipes
+it into `agent-notify.sh`, which is the point: one notifier keeps its foreground test, its
+four escapes, its notice and its banner, and a second copy of them in TypeScript would have
+drifted from the first by the next change.
 
 ### Not vendored
 
@@ -136,21 +144,24 @@ silently breaks the other.
 | finished a command | `✔` or `✘<code>` + command | `✘1 cargo build` |
 | idle | cwd basename | `~` |
 
-Both agents render in Codex's own words, because Codex picked good ones and the rule is
-then a sentence: **the tab shows what Codex would say.** For Codex it is close to a
-passthrough of its pane title — strip the `activity` prefix, keep the rest. For Claude the
-same string is synthesised from hooks, because Claude's pane title is a constant
-`✳ <session>` that does not change even while it is working. Sampled 14 times over 5.6s
-mid-turn, it was byte-identical every time; the spinner frames an earlier version of this
-config matched for do not exist.
+All three agents render in Codex's own words, because Codex picked good ones and the rule
+is then a sentence: **the tab shows what Codex would say.** For Codex it is close to a
+passthrough of its pane title — strip the `activity` prefix, keep the rest. For Claude and
+for opencode the same string is synthesised from hooks, because both publish a pane title
+that never changes. Claude's is a constant `✳ <session>`: sampled 14 times over 5.6s
+mid-turn, it was byte-identical every time, and the spinner frames an earlier version of
+this config matched for do not exist. opencode's is `OpenCode` until you send it anything and
+`OC | <session>` after that, so it names the session and never the project: the prefix is
+stripped and the session shown, with the pane's working directory standing in until the
+session has a name. `/rename` inside opencode is what sets it.
 
-| State | Codex | Claude |
-|---|---|---|
-| `Working` | its title | `UserPromptSubmit` hook |
-| `Action Required` | its title | `PermissionRequest` hook |
-| `Ready` | `Stop` hook — **not** its title | `Stop` and `Notification` hooks |
-| idle | visiting the pane clears `Ready` | visiting the pane clears `Ready` |
-| interrupted | its title | screen unchanged for 30s clears `Working` |
+| State | Codex | Claude | opencode |
+|---|---|---|---|
+| `Working` | its title | `UserPromptSubmit` hook | `UserPromptSubmit`, from `message.updated` |
+| `Action Required` | its title | `PermissionRequest` hook | `PermissionRequest`, from `permission.asked` |
+| `Ready` | `Stop` hook — **not** its title | `Stop` and `Notification` hooks | `Stop`, from `session.idle` |
+| idle | visiting the pane clears `Ready` | visiting the pane clears `Ready` | visiting the pane clears `Ready` |
+| interrupted | its title | screen unchanged for 30s clears `Working` | screen unchanged for 30s clears `Working` |
 
 `Ready` is the row worth reading twice. Codex's title reports `Ready` for a turn that just
 ended *and* for a pane nobody has touched since yesterday, so the title alone cannot tell
@@ -253,9 +264,11 @@ the network there stalls the bar; cache to a file and read the file.
 
 ### The agents tell you when they need you, in one vocabulary
 
-`~/.tmux/agent-notify.sh` serves both. Claude Code and Codex deliver the same hook payload
-— a JSON object on stdin with `.hook_event_name` and `.cwd` — so one script handles
-four events from Claude and two from Codex, and takes the label from its first argument. It
+`~/.tmux/agent-notify.sh` serves all three. Claude Code and Codex deliver the same hook
+payload — a JSON object on stdin with `.hook_event_name` and `.cwd` — and the opencode
+plugin builds that payload itself from the event bus, so one script handles four events from
+Claude, two from Codex and three from opencode, and takes the label from its first
+argument. It
 raises a tmux notice only when that agent's pane is in the background, and always exits 0:
 a hook that errors nags the agent, not you. It also sets the `@agent_state` the window tab
 and pane border read.
@@ -343,7 +356,7 @@ tracked.
 credential patterns and fails the commit:
 
 ```bash
-pre-commit install     # per clone — INSTALL.md step 9; git does not clone hooks
+pre-commit install     # per clone — INSTALL.md step 10; git does not clone hooks
 ```
 
 Commit time is the only cheap moment. Git history is permanent — a credential that lands in a

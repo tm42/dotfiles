@@ -1,11 +1,14 @@
 #!/bin/zsh
 # Coding-agent hook → tmux pane state + status strip + optional macOS notification.
 #
-# One script, two agents. The agent name is argument 1 and is used only for the
-# label, because Claude Code and Codex deliver the same hook payload: a JSON
-# object on stdin carrying .hook_event_name and .cwd, from a command named in
+# One script, three agents. The agent name is argument 1 and is used only for the
+# label, because all three deliver the same hook payload: a JSON object on stdin
+# carrying .hook_event_name and .cwd, from a command named in
 #   ~/.claude/settings.json   UserPromptSubmit, PermissionRequest, Notification, Stop
 #   ~/.codex/hooks.json       PermissionRequest, Stop
+# opencode has no hooks file and reaches this script from a plugin instead —
+# ~/.config/opencode/plugins/tmux-agent.ts, which builds the same JSON from the
+# event bus and pipes it in. UserPromptSubmit, PermissionRequest, Stop.
 # The one difference is that Codex's PermissionRequest has no .message — it
 # carries .tool_name and .tool_input.description instead.
 #
@@ -15,7 +18,8 @@
 # help; Claude publishes a constant "✳ <session>" that never changes, not even
 # while it is working, so every state Claude has comes from here.
 #
-#   working   a turn started. Claude only — Codex's title says Working itself.
+#   working   a turn started. Claude and opencode — Codex's title says Working
+#             itself.
 #   wait      blocked on you, from PermissionRequest. Codex says "Action
 #             Required" in its title too, so this is Claude's only source and
 #             Codex's backstop.
@@ -113,6 +117,13 @@ if [[ -n ${TMUX_PANE:-} && -n ${TMUX:-} ]]; then
   # that; the [^|]* in the second strip covers whatever that blinker renders as.
   title=${title##✳[[:space:]]#}
   title=${title##(#b)*(Ready|Working|Action Required)[[:space:]]#\|[[:space:]]#}
+  # opencode prefixes its session with "OC | " and publishes a bare "OpenCode"
+  # until the session has one, so the second is dropped and the .cwd basename
+  # stands in for it — the same split ~/.tmux.conf makes for the tab, so the tab
+  # and the notice never disagree about what a pane is called.
+  if [[ $agent == opencode ]]; then
+    [[ $title == 'OC | '* ]] && title=${title#'OC | '} || title=''
+  fi
   [[ -n $title ]] && name=$title
 
   # Not display-message; see the header of status-tick.sh. Pane-scoped rather
