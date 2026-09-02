@@ -10,7 +10,10 @@
 # THE NOTICE replaces `display-message`, whose timeout tmux cancels on the next
 # key you press: a Stop in window 4 vanished because you kept typing in window 1.
 # This one lives in the bar, so only its own pane coming into view clears it —
-# or HOLD seconds passing.
+# or HOLD seconds passing. Notices are pane-scoped options, so several can be
+# pending at once; past one they collapse to a count and a list of names, which
+# is the only shape that fits on a line already holding git, the clock and the
+# date.
 #
 # THE SWEEP retires a "Working" its pane has outlived. State is latched by hooks,
 # and Claude fires none when you interrupt a turn with Esc or when it is killed,
@@ -34,18 +37,46 @@ zmodload zsh/datetime
 HOLD=30     # seconds a notice survives if you never visit its pane
 FREEZE=30   # seconds of an unchanging screen before "Working" is retired
 
-notice=$(tmux show -gqv @notice)
-if [[ -n $notice ]]; then
-  at=$(tmux show -gqv @notice_at)
-  src=$(tmux show -gqv @notice_pane)
+# Every pending notice, gathered from the panes that own them. Read through a
+# process substitution rather than a pipe, because zsh runs every stage of a
+# pipeline in a subshell and $pending would not survive the loop.
+typeset -a pending
+single=''
+while IFS='|' read -r id nat ntxt nname nglyph; do
+  [[ -n $nat ]] || continue
   # The notifier's own foreground test: current pane, current window, and a
   # client attached to that session.
-  seen=$(tmux display -p -t "$src" \
+  seen=$(tmux display -p -t "$id" \
         '#{&&:#{session_attached},#{&&:#{pane_active},#{window_active}}}' 2>/dev/null)
-  if (( EPOCHSECONDS - ${at:-0} >= HOLD )) || [[ $seen == 1 ]]; then
-    tmux set -gu @notice \; set -gu @notice_at \; set -gu @notice_pane \; refresh-client -S
-    notice=''
+  if (( EPOCHSECONDS - nat >= HOLD )) || [[ $seen == 1 ]]; then
+    tmux set -pu -t "$id" @notice_txt \; set -pu -t "$id" @notice_name \; \
+         set -pu -t "$id" @notice_glyph \; set -pu -t "$id" @notice_at \; refresh-client -S
+    continue
   fi
+  pending+=("$nat|$nname|$nglyph")
+  single=$ntxt
+done < <(tmux list-panes -a \
+         -F '#{pane_id}|#{@notice_at}|#{@notice_txt}|#{@notice_name}|#{@notice_glyph}' 2>/dev/null)
+
+notice=''
+if (( ${#pending} == 1 )); then
+  notice=$single
+elif (( ${#pending} > 1 )); then
+  # Newest first, and ◆ outranks ✳: one pane blocked on you matters more than
+  # two that merely finished, and taking the last hook's glyph would let a Stop
+  # mask a pending approval. The verb goes away with the collapse — three of
+  # them will not fit beside git, the clock and the date, and the count is the
+  # news. One cap on the joined list, since the per-name cap that ends at the
+  # right width for one name is three times too wide for three.
+  typeset -a names
+  glyph='✳'
+  for e in ${(On)pending}; do
+    rest=${e#*|}; names+=("${rest%|*}")
+    [[ ${e##*|} == '◆' ]] && glyph='◆'
+  done
+  list=${(j:, :)names}
+  (( ${#list} > 46 )) && list="${list[1,45]}…"
+  notice=" $glyph  ${#pending} agents  ·  $list "
 fi
 
 tmux list-panes -a -F '#{pane_id} #{@agent_state} #{@agent_screen} #{@agent_screen_at}' 2>/dev/null |

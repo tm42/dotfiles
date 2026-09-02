@@ -256,9 +256,15 @@ the network there stalls the bar; cache to a file and read the file.
 `~/.tmux/agent-notify.sh` serves both. Claude Code and Codex deliver the same hook payload
 — a JSON object on stdin with `.hook_event_name` and `.cwd` — so one script handles
 four events from Claude and two from Codex, and takes the label from its first argument. It
-raises a tmux message only when that agent's pane is in the background, and always exits 0:
+raises a tmux notice only when that agent's pane is in the background, and always exits 0:
 a hook that errors nags the agent, not you. It also sets the `@agent_state` the window tab
 and pane border read.
+
+Each notice is a pane-scoped option, so several can be pending at once. Past one they
+collapse to a count and a list of names — ` ◆  3 agents  ·  flw, punto, system-setup ` —
+because three verbs will not fit on a line already carrying git, the clock and the date,
+and the count is the news anyway. A `◆` anywhere in the set wins over `✳`: a pane blocked
+on you outranks two that merely finished.
 
 The macOS banner is off until you export `AGENT_NOTIFY_BANNER` — at one per turn it is a
 lot of banners, and the tmux strip already says it where you are looking. Which also means

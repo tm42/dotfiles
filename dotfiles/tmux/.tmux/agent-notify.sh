@@ -116,21 +116,28 @@ if [[ -n ${TMUX_PANE:-} && -n ${TMUX:-} ]]; then
   title=${title##(#b)*(Ready|Working|Action Required)[[:space:]]#\|[[:space:]]#}
   [[ -n $title ]] && name=$title
 
-  # Three hazards, all of them the status bar's rather than a message's. '#'
+  # Four hazards, all of them the status bar's rather than a message's. '#'
   # introduces a format, and both halves reach the bar: the verb from the agent,
   # the name from the pane title. A newline is worse than it looks — tmux keeps
   # only the LAST line of a #() job's output, so one newline in a Codex tool
   # description drops the glyph, the agent, the window and the name, and the
-  # highlight with them. And the caps keep the whole notice inside the 85 cells
-  # that status-right has left after git, the clock and the date; nothing else
-  # trims it, and tmux trims from the right, so an uncapped name eats the clock.
+  # highlight with them. '|' is the field separator status-tick.sh reads these
+  # back with, and a Codex tool description is free to contain one. And the caps
+  # keep the whole notice inside the 85 cells that status-right has left after
+  # git, the clock and the date; nothing else trims it, and tmux trims from the
+  # right, so an uncapped name eats the clock.
   # $name itself stays clean: the macOS banner is not a tmux format.
-  esc=${${${verb//$'\n'/ }//\#/\#\#}:0:40}
-  nesc=${${${name//$'\n'/ }//\#/\#\#}:0:20}
-  # Not display-message; see the header of status-tick.sh.
-  tmux set -g @notice " $glyph  $agent w$idx  $nesc — $esc " \; \
-       set -g @notice_pane "$TMUX_PANE" \; \
-       set -g @notice_at "$EPOCHSECONDS" \; \
+  esc=${${${${verb//$'\n'/ }//\#/\#\#}//\|//}:0:40}
+  nesc=${${${${name//$'\n'/ }//\#/\#\#}//\|//}:0:20}
+  # Not display-message; see the header of status-tick.sh. Pane-scoped rather
+  # than global, because a single global slot meant the second of two agents
+  # finishing at once erased the first with nothing to say it had. The pane that
+  # owns the option is also the pane whose arrival clears it, so there is no
+  # separate @notice_pane to keep in step.
+  tmux set -p -t "$TMUX_PANE" @notice_txt " $glyph  $agent w$idx  $nesc — $esc " \; \
+       set -p -t "$TMUX_PANE" @notice_name "$nesc" \; \
+       set -p -t "$TMUX_PANE" @notice_glyph "$glyph" \; \
+       set -p -t "$TMUX_PANE" @notice_at "$EPOCHSECONDS" \; \
        refresh-client -S
 fi
 
