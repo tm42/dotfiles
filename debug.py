@@ -111,18 +111,57 @@ SWEPT = ("@agent_state", "@notice_txt", "@notice_name", "@notice_glyph",
          "@notice_at", "@agent_screen", "@agent_screen_at")
 
 
+# Separators for every `list-panes -F` read in this file. Not "|" and not a
+# newline, which is what a tmux format is usually joined and split on, because
+# both occur in the data: @notice_txt and @notice_name carry text an agent
+# wrote. Measured, both on a scratch server:
+#   a "|" in @notice_txt shifted every field after it one place left, and the
+#     restore then wrote a non-numeric string into @notice_at on a real pane —
+#     which status-tick.sh evaluates arithmetically on every redraw;
+#   a newline in @notice_txt ended the record early, so the fields after it read
+#     as unset and `inspect` reported, in detail, a fault that had not happened.
+# Neither byte can appear in tmux's own output for these formats.
+US, RS = "\x1f", "\x1e"
+
+
+def panes_format(*fields: str) -> str:
+    """A `list-panes -F` format that can be parsed back unambiguously."""
+    return US.join("#{" + f + "}" for f in fields) + RS
+
+
+def panes_rows(stdout: str, n: int) -> list:
+    """The records of such a read, each one exactly n fields.
+
+    Raises rather than padding or dropping. A short record used to be padded
+    with empty strings, and empty is a meaningful value here — it is what an
+    unset option looks like — so the padding did not read as missing data, it
+    read as a pane whose notice had been cleared."""
+    rows = []
+    for record in stdout.split(RS):
+        record = record.strip("\n")
+        if not record:
+            continue
+        vals = record.split(US)
+        if len(vals) != n:
+            raise ProbeFailed(f"tmux returned {len(vals)} fields where {n} were "
+                              f"asked for: {record!r}")
+        rows.append(vals)
+    return rows
+
+
 def snapshot_options() -> dict:
-    """Every pane's swept options, keyed by pane id."""
-    fmt = "#{pane_id}" + "".join("|#{%s}" % o for o in SWEPT)
-    r = tmux("list-panes", "-a", "-F", fmt)
+    """Every pane's swept options, keyed by pane id.
+
+    Empty on any failure, including a record it cannot parse: restore_options
+    is called from a `finally`, and a raise there would replace whatever sent
+    the probe there in the first place."""
+    r = tmux("list-panes", "-a", "-F", panes_format("pane_id", *SWEPT))
     if r.returncode != 0:
         return {}
-    snap = {}
-    for line in r.stdout.splitlines():
-        parts = line.split("|", len(SWEPT))
-        if len(parts) == len(SWEPT) + 1:
-            snap[parts[0]] = parts[1:]
-    return snap
+    try:
+        return {row[0]: row[1:] for row in panes_rows(r.stdout, len(SWEPT) + 1)}
+    except ProbeFailed:
+        return {}
 
 
 def restore_options(before: dict, skip: str) -> int:
@@ -458,11 +497,6 @@ def tick_constant(name: str, default: int) -> int:
     return default
 
 
-# A separator that cannot turn up inside a field. @notice_txt is free-form and
-# carries a "|" as often as not, which is the character every other format in
-# this repo splits on.
-US = "\x1f"
-
 INSPECT_FIELDS = ("pane_id", "session_name", "window_index", "pane_index",
                   "pane_current_command", "pane_title", "window_active",
                   "pane_active", "session_attached", "@agent_state",
@@ -477,19 +511,13 @@ def read_panes(target=None) -> list:
     window tab actually shows, expanded by tmux from the same option the status
     line uses, so the report never has to reimplement .tmux.conf's conditionals
     and then disagree with them."""
-    fmt = US.join("#{" + f + "}" for f in INSPECT_FIELDS)
-    args = ["list-panes", "-F", fmt] + (["-t", target] if target else ["-a"])
+    args = ["list-panes", "-F", panes_format(*INSPECT_FIELDS)] + \
+           (["-t", target] if target else ["-a"])
     r = tmux(*args)
     if r.returncode != 0:
         raise ProbeFailed(f"{target or 'every pane'}: {r.stderr.strip() or 'tmux list-panes failed'}")
-    panes = []
-    for line in r.stdout.splitlines():
-        if not line:
-            continue
-        vals = line.split(US)
-        vals += [""] * (len(INSPECT_FIELDS) - len(vals))
-        panes.append(dict(zip(INSPECT_FIELDS, vals)))
-    return panes
+    return [dict(zip(INSPECT_FIELDS, row))
+            for row in panes_rows(r.stdout, len(INSPECT_FIELDS))]
 
 
 def diagnose(pane: dict, now: int, hold: int, freeze: int) -> list:
@@ -607,11 +635,19 @@ def cmd_watch(args) -> int:
             while True:
                 ts = int(time.time())
                 r = tmux("list-panes", "-a", "-F",
-                         "#{pane_id}|#{@agent_state}|#{@notice_txt}|#{@notice_name}|"
-                         "#{@notice_glyph}|#{@notice_at}")
+                         panes_format("pane_id", "@agent_state", "@notice_txt",
+                                      "@notice_name", "@notice_glyph", "@notice_at"))
                 if r.returncode == 0:
-                    for line in r.stdout.splitlines():
-                        pane_id, state, ntxt, nname, nglyph, nat = line.split("|", 5)
+                    try:
+                        rows = panes_rows(r.stdout, 6)
+                    except ProbeFailed as e:
+                        # A sampler that dies on one bad tick loses the hours of
+                        # recording it was left running for.
+                        f.write(f"{ts}\tUNPARSED\t{e}\n")
+                        f.flush()
+                        time.sleep(args.interval)
+                        continue
+                    for pane_id, state, ntxt, nname, nglyph, nat in rows:
                         # Only panes with something set: a full sweep every tick
                         # for every idle pane would drown the one line that matters.
                         # ntxt is in the test and not redundant — @notice_txt set
@@ -620,6 +656,10 @@ def cmd_watch(args) -> int:
                         # between the two, and testing state and nat alone drops
                         # precisely the pane worth catching.
                         if state or nat or ntxt:
+                            # Newlines escaped for the tap wrapper's reason: one
+                            # event is one line, or grepping the log at the
+                            # moment it matters is worth nothing.
+                            ntxt = ntxt.replace("\n", "\\n")
                             f.write(f"{ts}\tSAMPLE\t{pane_id}\tstate={state}\tnotice_at={nat}\t"
                                     f"notice_txt={ntxt}\tnotice_name={nname}\tnotice_glyph={nglyph}\n")
                     f.flush()
