@@ -5,7 +5,10 @@ MUTATES. Unlike check.py, this one creates a throwaway tmux window, sets pane
 options, temporarily appends to status-right, and swaps a symlink. Every one of
 those is undone before it exits — including on an exception or Ctrl-C — except
 `tap on`, which is the one subcommand meant to leave a change in place until
-`tap off` runs.
+`tap off` runs. `inspect` is the exception in the other direction: it only ever
+reads, which is what makes it the safe thing to point at a pane that is stuck
+right now. Running status-tick.sh by hand, as `chain` does, would sweep the very
+notice you are trying to look at.
 
 The chain it inspects, in order: an agent (Claude, Codex, opencode) fires a
 hook -> ~/.tmux/agent-notify.sh sets @agent_state and four @notice_* pane
@@ -17,7 +20,8 @@ and jq rather than reimplementing any of them: the thing under test is the
 real scripts, so a second implementation of their logic would pass while they
 fail.
 
-    ./debug.py chain [--agent claude|codex|opencode]
+    ./debug.py inspect [WINDOW]              # read-only: why does that tab say that?
+    ./debug.py chain [--agent claude|codex|opencode] [--target WINDOW]
     ./debug.py watch [--interval SECONDS] [--log PATH]
     ./debug.py mark [--log PATH] [TEXT ...]
     ./debug.py tap on|off|status
@@ -38,6 +42,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -169,28 +174,49 @@ def tmux_env_for_pane(pane_id: str) -> dict:
 
 
 def pick_session():
-    """Returns (session_name, caveat). caveat is None when a client is
-    attached to the session chosen — only then does session_attached read 1
-    and the foreground test in step 5 mean anything. Prefers an attached
-    session over guessing; refuses to pick among several unattached ones,
-    because a wrong guess there produces readings that look valid and are not."""
-    r = tmux("list-sessions", "-F", "#{session_name}|#{session_attached}")
+    """Returns (session_id, caveat). caveat is None when a client is attached
+    to the session chosen — only then does session_attached read nonzero and
+    the foreground test in step 5 mean anything. Prefers an attached session
+    over guessing; refuses to pick among several unattached ones, because a
+    wrong guess there produces readings that look valid and are not.
+
+    The id ($0) and not the name, because `-t <name>` is ambiguous: tmux reads
+    a target that looks like a number as a window index in the current session.
+    A session named "0" — which is what `tmux new-session` gives you when you
+    never name one — turned `new-window -t 0` into "create window failed:
+    index 0 in use". A session id can never be read as an index.
+
+    session_attached is a count of clients, not a flag, so it is compared
+    against "0" rather than against "1": a session you are attached to from
+    two terminals reads 2, and testing for "1" dropped it."""
+    r = tmux("list-sessions", "-F", "#{session_id}|#{session_attached}")
     if r.returncode != 0:
         return None, r.stderr.strip() or "no tmux server on this socket"
-    lines = [ln for ln in r.stdout.splitlines() if ln]
-    if not lines:
+    rows = [ln.split("|") for ln in r.stdout.splitlines() if ln]
+    if not rows:
         return None, "no sessions on this socket"
-    attached = [ln.split("|")[0] for ln in lines if ln.endswith("|1")]
+    attached = [sid for sid, att in rows if att != "0"]
     if attached:
         return attached[0], None
-    if len(lines) == 1:
-        name = lines[0].split("|")[0]
-        return name, "no client is attached — session_attached will read 0, so the background test below cannot mean anything"
-    return None, f"{len(lines)} sessions on this socket, none with a client attached — re-run with an attached client, or reduce to one session"
+    if len(rows) == 1:
+        return rows[0][0], "no client is attached — session_attached will read 0, so the background test below cannot mean anything"
+    return None, f"{len(rows)} sessions on this socket, none with a client attached — re-run with an attached client, or reduce to one session"
+
+
+def resolve_target_pane(target: str) -> str:
+    """A window or pane the caller named — "3", "0:3", "%12", "3.1" — down to
+    one pane id. tmux resolves it, not this function, so anything tmux accepts
+    works and nothing here has to know the syntax. The first pane of a window
+    with several is the one probed, and the caller prints what it resolved to
+    so a target that landed somewhere unintended is visible rather than silent."""
+    r = tmux("list-panes", "-t", target, "-F", "#{pane_id}")
+    if r.returncode != 0 or not r.stdout.strip():
+        raise ProbeFailed(f"--target {target!r}: {r.stderr.strip() or 'matched no pane'}")
+    return r.stdout.split()[0]
 
 
 def run_probe(session: str, event: str, message: str, agent: str, expect_state: str,
-              expect_notice: bool, why_no_notice: str = "") -> None:
+              expect_notice: bool, why_no_notice: str = "", target: str = None) -> None:
     """One throwaway window, one synthetic hook payload, one comparison that
     matters: whether status-tick.sh's own rendering agrees with what
     agent-notify.sh just set. Reporting the two readings separately — as an
@@ -206,14 +232,29 @@ def run_probe(session: str, event: str, message: str, agent: str, expect_state: 
     # the only one: current.toml makes "no throwaway window survives an
     # interrupt" a property, and a property with a hole in it is not one.
     window_id = None
+    borrowed = None      # (pane_id, options as they were) when --target lent us one
     try:
-        r = tmux("new-window", "-d", "-t", session, "-P", "-F", "#{window_id}")
-        if r.returncode != 0:
-            bad(f"could not create a probe window: {r.stderr.strip()}")
-            return
-        window_id = r.stdout.strip()
-        r = tmux("list-panes", "-t", window_id, "-F", "#{pane_id}")
-        pane_id = r.stdout.strip().splitlines()[0]
+        if target:
+            # A window you already have and are willing to have written on, for
+            # the case where creating one is what fails. Its options go back the
+            # way `finally` puts a created window back: killed there, restored
+            # here, and the probe itself is identical either way.
+            pane_id = resolve_target_pane(target)
+            where = tmux("display", "-p", "-t", pane_id,
+                         "#{session_name}:#{window_index}.#{pane_index} #{pane_current_command}")
+            ok(f"probing in {where.stdout.strip()} ({pane_id}), lent by --target {target}")
+            borrowed = (pane_id, snapshot_options().get(pane_id))
+        else:
+            # -a, and the session by id: without -a tmux wants the target
+            # window's own index, which is by definition in use.
+            r = tmux("new-window", "-d", "-a", "-t", f"{session}:", "-P", "-F", "#{window_id}")
+            if r.returncode != 0:
+                bad(f"could not create a probe window: {r.stderr.strip()} — "
+                    f"if a window is easier to lend than to create, ./debug.py chain --target <window>")
+                return
+            window_id = r.stdout.strip()
+            r = tmux("list-panes", "-t", window_id, "-F", "#{pane_id}")
+            pane_id = r.stdout.strip().splitlines()[0]
 
         r = tmux("display", "-p", "-t", pane_id,
                   "#{session_attached}|#{pane_active}|#{window_active}")
@@ -284,6 +325,8 @@ def run_probe(session: str, event: str, message: str, agent: str, expect_state: 
     finally:
         if window_id:
             tmux("kill-window", "-t", window_id)
+        elif borrowed and borrowed[1] is not None:
+            restore_options({borrowed[0]: borrowed[1]}, skip=None)
 
 
 def cmd_chain(args) -> int:
@@ -331,13 +374,17 @@ def cmd_chain(args) -> int:
 
     # 5. throwaway window, and whether it is genuinely in the background —
     # everything from here on is meaningless if this is wrong, so it is
-    # checked and reported before anything that depends on it.
-    session, caveat = pick_session()
-    if session is None:
-        bad(f"no session to probe: {caveat}")
-        return 1
-    if caveat:
-        warn(caveat)
+    # checked and reported before anything that depends on it. With --target
+    # there is no window to create and no session to guess: the caller named
+    # the pane, and picking a session for it could only contradict them.
+    session = None
+    if not args.target:
+        session, caveat = pick_session()
+        if session is None:
+            bad(f"no session to probe: {caveat}")
+            return 1
+        if caveat:
+            warn(caveat)
 
     # 6/7. Two probes, not one. PermissionRequest first: every agent sets
     # state=wait and raises a ◆ notice for it with no branch on $agent, so it
@@ -353,10 +400,11 @@ def cmd_chain(args) -> int:
     # actually exercises the --agent flag — worth keeping, just not as the
     # only reading the default run depends on.
     run_probe(session, "PermissionRequest", "debug.py chain probe",
-              args.agent, "wait", expect_notice=True)
+              args.agent, "wait", expect_notice=True, target=args.target)
     run_probe(session, "Notification", "debug.py chain probe",
               args.agent, "ready", expect_notice=(args.agent != "claude"),
-              why_no_notice=" (expected: agent-notify.sh suppresses claude's own soft-ready glyph)")
+              why_no_notice=" (expected: agent-notify.sh suppresses claude's own soft-ready glyph)",
+              target=args.target)
 
     # 8. #() jobs actually run on status-right at all. #{E:status-right}
     # cannot answer this — it returns the format with job output missing,
@@ -393,6 +441,156 @@ def cmd_chain(args) -> int:
     else:
         print(f"{GREEN}✔ the whole chain is alive{OFF}")
     return 1 if _fail else 0
+
+
+# ── inspect ──────────────────────────────────────────────────
+
+# status-tick.sh's own thresholds, read out of it rather than copied here: two
+# files that have to agree about a number are two files that drift.
+def tick_constant(name: str, default: int) -> int:
+    try:
+        for line in REAL_STATUS_TICK.read_text().splitlines():
+            m = re.match(rf"\s*{name}=(\d+)", line)
+            if m:
+                return int(m.group(1))
+    except OSError:
+        pass
+    return default
+
+
+# A separator that cannot turn up inside a field. @notice_txt is free-form and
+# carries a "|" as often as not, which is the character every other format in
+# this repo splits on.
+US = "\x1f"
+
+INSPECT_FIELDS = ("pane_id", "session_name", "window_index", "pane_index",
+                  "pane_current_command", "pane_title", "window_active",
+                  "pane_active", "session_attached", "@agent_state",
+                  "@notice_txt", "@notice_name", "@notice_glyph", "@notice_at",
+                  "@agent_screen_at", "E:@agent_lbl")
+
+
+def read_panes(target=None) -> list:
+    """Every field the tab is built from, for one target or for every pane.
+
+    #{E:@agent_lbl} is the whole point of reading it here: it is the text the
+    window tab actually shows, expanded by tmux from the same option the status
+    line uses, so the report never has to reimplement .tmux.conf's conditionals
+    and then disagree with them."""
+    fmt = US.join("#{" + f + "}" for f in INSPECT_FIELDS)
+    args = ["list-panes", "-F", fmt] + (["-t", target] if target else ["-a"])
+    r = tmux(*args)
+    if r.returncode != 0:
+        raise ProbeFailed(f"{target or 'every pane'}: {r.stderr.strip() or 'tmux list-panes failed'}")
+    panes = []
+    for line in r.stdout.splitlines():
+        if not line:
+            continue
+        vals = line.split(US)
+        vals += [""] * (len(INSPECT_FIELDS) - len(vals))
+        panes.append(dict(zip(INSPECT_FIELDS, vals)))
+    return panes
+
+
+def diagnose(pane: dict, now: int, hold: int, freeze: int) -> list:
+    """What is stuck, and what would unstick it. One entry per finding, and no
+    entry at all for a pane that is behaving — a report that says something
+    about every pane is one nobody reads to the end of."""
+    out = []
+    state, title = pane["@agent_state"], pane["pane_title"]
+    label, nat, pid = pane["E:@agent_lbl"], pane["@notice_at"], pane["pane_id"]
+
+    if label.startswith("Action Required"):
+        if state == "wait":
+            out.append(
+                "the tab says Action Required because @agent_state is wait. Nothing retires a "
+                f"wait on a timer — status-tick.sh retires a frozen `working` after FREEZE={freeze}s "
+                "and nothing else. It clears when this pane's agent next fires UserPromptSubmit "
+                "(you submit a prompt) or Stop (a turn ends). If the agent has exited, no hook "
+                f"will fire again: `tmux set -pu -t {pid} @agent_state` is what is left.")
+        elif re.match(r"^[^|]*Action Required \|", title):
+            out.append(
+                f"the tab says Action Required because the pane TITLE does, and @agent_state is "
+                f"{state!r}. Codex writes its run state into its own title, so punto is relaying "
+                "it and keeps relaying it until the agent rewrites it. Nothing in this repo "
+                "clears that, and nothing in this repo set it.")
+        else:
+            out.append("the tab says Action Required and neither @agent_state nor the pane title "
+                       "explains it — read @agent_lbl in .tmux.conf")
+
+    if pane["@notice_txt"] and not nat:
+        out.append(
+            "@notice_txt is set with @notice_at empty. status-tick.sh skips such a pane outright "
+            "(`[[ -n $nat ]] || continue`), so this notice is invisible to the sweep in both "
+            "directions: never rendered, never cleared. The `\\;` chain in agent-notify.sh died "
+            "between the two set calls — txt is set first and at is set last.")
+    elif nat.isdigit():
+        age = now - int(nat)
+        if age >= hold:
+            out.append(
+                f"the notice is {age}s old and still set, past HOLD={hold}s. The sweep is not "
+                "clearing it: either no client is redrawing status-right, or status-tick.sh is "
+                "failing. `./debug.py chain` separates those two.")
+
+    if state == "working" and pane["@agent_screen_at"].isdigit():
+        age = now - int(pane["@agent_screen_at"])
+        if age >= freeze:
+            out.append(f"state is working and the screen last changed {age}s ago, past "
+                       f"FREEZE={freeze}s — the sweep should have retired it and has not.")
+    return out
+
+
+def cmd_inspect(args) -> int:
+    """Read-only. Nothing here sets, unsets or sweeps anything, so it can be
+    pointed at a pane that is misbehaving right now without destroying the
+    evidence — which running status-tick.sh by hand would do."""
+    now = int(time.time())
+    hold, freeze = tick_constant("HOLD", 30), tick_constant("FREEZE", 30)
+    try:
+        panes = read_panes(args.target)
+    except ProbeFailed as e:
+        bad(str(e))
+        return 1
+
+    # With a target the caller named the pane, so every pane of it is printed
+    # even when clean — "nothing is set here" is the answer to half the
+    # questions this command gets asked. Without one, only panes carrying
+    # something, or the tab would be a list of every shell you have open.
+    interesting = [p for p in panes
+                   if args.target or p["@agent_state"] or p["@notice_at"] or p["@notice_txt"]
+                   or p["E:@agent_lbl"].startswith(("Ready |", "Working |", "Action Required |"))]
+    say(f"inspect — {len(interesting)} of {len(panes)} pane(s)"
+        + (f" under {args.target}" if args.target else " carrying agent state")
+        + (f" on socket {SOCKET}" if SOCKET else ""))
+    if not interesting:
+        print("  nothing set on any pane: no agent has reported into this server since it started.")
+        return 0
+
+    findings = 0
+    for pane in interesting:
+        fg = (pane["session_attached"] != "0" and pane["pane_active"] == "1"
+              and pane["window_active"] == "1")
+        print(f"\n{BOLD}{pane['session_name']}:{pane['window_index']}.{pane['pane_index']}{OFF}"
+              f"  {pane['pane_id']}  {pane['pane_current_command']}"
+              f"  {'foreground' if fg else 'background'}")
+        print(f"  tab shows    : {pane['E:@agent_lbl']!r}")
+        print(f"  @agent_state : {pane['@agent_state']!r}")
+        nat = pane["@notice_at"]
+        age = f"{now - int(nat)}s ago" if nat.isdigit() else f"{nat!r}"
+        print(f"  notice       : glyph={pane['@notice_glyph']!r} name={pane['@notice_name']!r} "
+              f"at={age}")
+        print(f"                 txt={pane['@notice_txt']!r}")
+        print(f"  pane_title   : {pane['pane_title']!r}")
+        for line in diagnose(pane, now, hold, freeze):
+            findings += 1
+            warn(line)
+
+    print()
+    if findings:
+        print(f"{YELLOW}{findings} thing(s) to explain above{OFF}")
+    else:
+        ok("every pane above is in a state something will clear")
+    return 0
 
 
 # ── watch / mark ─────────────────────────────────────────────
@@ -543,6 +741,17 @@ def main() -> int:
 
     p_chain = sub.add_parser("chain", help="one-shot: is every link between a hook and the bar alive?")
     p_chain.add_argument("--agent", choices=("claude", "codex", "opencode"), default="claude")
+    p_chain.add_argument("--target", metavar="WINDOW",
+                         help="probe in a window you already have — anything tmux accepts as a "
+                              "target: 3, sess:3, %%12. Its options are put back afterwards. Use it "
+                              "when creating a window is what fails, or when you want the probe to "
+                              "land somewhere you can watch.")
+
+    p_inspect = sub.add_parser("inspect",
+                               help="read-only: what state is each pane in, and what is stuck?")
+    p_inspect.add_argument("target", nargs="?", metavar="WINDOW",
+                           help="one window or pane (3, sess:3, %%12). Omit for every pane "
+                                "carrying agent state.")
 
     p_watch = sub.add_parser("watch", help="continuous sampler, for faults that will not reproduce on demand")
     p_watch.add_argument("--interval", type=float, default=2.0, metavar="SECONDS")
@@ -560,6 +769,8 @@ def main() -> int:
 
     if args.cmd == "chain":
         return cmd_chain(args)
+    if args.cmd == "inspect":
+        return cmd_inspect(args)
     if args.cmd == "watch":
         return cmd_watch(args)
     if args.cmd == "mark":
