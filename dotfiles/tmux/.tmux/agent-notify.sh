@@ -97,16 +97,43 @@ case $event in
 esac
 
 name=${cwd:t}
-if [[ -n ${TMUX_PANE:-} && -n ${TMUX:-} ]]; then
+
+# Which pane is this hook about? tmux exports TMUX_PANE into everything it
+# spawns, so an agent started in a pane inherits it and hands it to the hook.
+# Not always: on one machine Claude runs with neither TMUX nor TMUX_PANE in its
+# environment while `list-panes` shows it as that pane's own current command —
+# plain binary, no wrapper, launched from the pane's shell — so every hook it
+# fired was dropped on this line and the pane's state froze at whatever it last
+# was. The pane still owns the process, so ask the process tree when the
+# variable is missing: walk up from this script until a pid is some pane's
+# pane_pid. The real chain is hook -> agent -> pane shell, three hops.
+#
+# Costs one `list-panes` and a few `ps` calls, and only on the fallback. With no
+# $TMUX the tmux calls resolve the default socket, which is the only one they
+# could have been about.
+pane=${TMUX_PANE:-}
+if [[ -z $pane ]]; then
+  typeset -A pane_of
+  while read -r ppid pid; do pane_of[$ppid]=$pid; done < <(
+    tmux list-panes -a -F '#{pane_pid} #{pane_id}')
+  p=$$
+  for _ in {1..12}; do
+    [[ -n ${pane_of[$p]:-} ]] && { pane=${pane_of[$p]}; break }
+    p=${${$(ps -o ppid= -p $p)}// /}
+    [[ -n $p ]] && (( p > 1 )) || break
+  done
+fi
+
+if [[ -n $pane ]]; then
   # session_attached, not just pane_active and window_active: those two say the
   # pane is the current one *within its own session*, which is true of every
   # pane in a session nobody is looking at. Without it, detaching and leaving an
   # agent running made Stop clear the state instead of setting ready — the exact
   # case ready exists for.
-  info=$(tmux display -p -t "$TMUX_PANE" \
+  info=$(tmux display -p -t "$pane" \
         '#{&&:#{session_attached},#{&&:#{pane_active},#{window_active}}}|#I.#P|#{@agent_state}|#{pane_title}')
   fg=${info%%|*}
-  # A stale TMUX_PANE is not an error to tmux 3.7c: it exits 0 and expands the
+  # A stale pane id is not an error to tmux 3.7c: it exits 0 and expands the
   # format against empty fields, so testing the field beats testing the string.
   [[ $fg == [01] ]] || exit 0
 
@@ -123,9 +150,9 @@ if [[ -n ${TMUX_PANE:-} && -n ${TMUX:-} ]]; then
   if [[ -n $soft && $cur == wait ]]; then
     :
   elif [[ $state == ready && $fg == 1 ]]; then
-    tmux set -pu -t "$TMUX_PANE" @agent_state
+    tmux set -pu -t "$pane" @agent_state
   elif [[ -n $state ]]; then
-    tmux set -p -t "$TMUX_PANE" @agent_state "$state"
+    tmux set -p -t "$pane" @agent_state "$state"
   fi
   tmux refresh-client -S
 
@@ -168,10 +195,10 @@ if [[ -n ${TMUX_PANE:-} && -n ${TMUX:-} ]]; then
     # $name itself stays clean: the macOS banner is not a tmux format.
     esc=${${${${verb//$'\n'/ }//\#/\#\#}//\|//}:0:40}
     nesc=${${${${name//$'\n'/ }//\#/\#\#}//\|//}:0:20}
-    tmux set -p -t "$TMUX_PANE" @notice_txt " $glyph  $agent w$idx  $nesc — $esc " \; \
-         set -p -t "$TMUX_PANE" @notice_name "$nesc" \; \
-         set -p -t "$TMUX_PANE" @notice_glyph "$glyph" \; \
-         set -p -t "$TMUX_PANE" @notice_at "$EPOCHSECONDS" \; \
+    tmux set -p -t "$pane" @notice_txt " $glyph  $agent w$idx  $nesc — $esc " \; \
+         set -p -t "$pane" @notice_name "$nesc" \; \
+         set -p -t "$pane" @notice_glyph "$glyph" \; \
+         set -p -t "$pane" @notice_at "$EPOCHSECONDS" \; \
          refresh-client -S
   fi
 fi
