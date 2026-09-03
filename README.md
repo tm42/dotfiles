@@ -235,6 +235,12 @@ The agnoster segments — host, venv, path, git — and Claude Code's statusline
 values, so the prompt and the bar above it read as one unit. The zsh half is `.zshrc` §3; the
 other half is `statusline-agnoster.sh`.
 
+Two rules the two halves share. `user@host` is drawn only when it is not the obvious one —
+the prompt asks that as root, another user, or SSH; the statusline asks it as root or SSH,
+because `$DEFAULT_USER` is a shell variable no hook script is handed. The venv segment is
+labelled `V:` in both, since naming it after the project rather than after `.venv` makes a
+bare name read as one more path component.
+
 The theme itself is stock. Colours are twelve `AGNOSTER_*` variables agnoster reads as
 defaults, exported in §3 before it loads. What no variable reaches is redefined in §5, after
 oh-my-zsh sources the theme: a truncated path (`prompt_dir`), typing on the second line

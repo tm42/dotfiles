@@ -146,12 +146,14 @@ prompt_context() {
 # Shows an activated venv only: the prompt describes this shell, and
 # `uv pip install --python .venv/bin/python` never activates one.
 # Drops stock's conda branch — nothing here uses conda.
+# The "V:" is there because naming the venv after the project makes it read as
+# another path component next to the segment that actually is one.
 export VIRTUAL_ENV_DISABLE_PROMPT=1
 prompt_virtualenv() {
   [[ -n $VIRTUAL_ENV ]] || return
   local name=${VIRTUAL_ENV:t}
   [[ $name == .venv ]] && name=${VIRTUAL_ENV:h:t}
-  prompt_segment "$AGNOSTER_VENV_BG" "$AGNOSTER_VENV_FG" "${name:gs/%/%%}"
+  prompt_segment "$AGNOSTER_VENV_BG" "$AGNOSTER_VENV_FG" "V:${name:gs/%/%%}"
 }
 
 # Type on line 2. Stock leaves the cursor on the same line as the segment bar,

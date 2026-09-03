@@ -57,12 +57,24 @@ if [ "$_n" -gt 3 ]; then
     display_dir=".../${_nonempty[$((_n-3))]}/${_nonempty[$((_n-2))]}/${_nonempty[$((_n-1))]}"
 fi
 
-# --- LINE 1: user@host  directory  [git] ---
+# --- LINE 1: [user@host]  [venv]  directory  [git] ---
 
-# User and host segment (blue background, white text)
-user=$(whoami)
-host=$(hostname -s)
-printf "${BG_BLUE}${BLACK} %s@%s " "$user" "$host"
+# Identity: only when it is not the obvious one, which is the rule ~/.zshrc's
+# prompt_context follows — root, or a session that arrived over SSH. On the
+# machine in front of you the segment spends width on a fact you already know;
+# on the remote it is the one thing here worth that width. The test is root or
+# SSH rather than zsh's $USERNAME != $DEFAULT_USER, because DEFAULT_USER is a
+# shell variable this script is never handed.
+#
+# From here every segment opens with the previous one's arrow through $PREV_FG,
+# and an empty $PREV_FG means this is the first segment on the line and there is
+# nothing to arrow from. Line 2 uses the same contract, and so does the local
+# segment file it sources.
+PREV_FG=""
+if [ "$(id -u)" -eq 0 ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+    printf "${BG_BLUE}${BLACK} %s@%s " "$(whoami)" "$(hostname -s)"
+    PREV_FG="$FG_BLUE"
+fi
 
 # Venv segment (metallic grey, between host and path)
 venv_name=""
@@ -79,19 +91,13 @@ elif [ -d "$current_dir/.venv" ]; then
 fi
 
 if [ -n "$venv_name" ]; then
-    # Arrow: blue → grey
-    printf "${BG_VENV}${FG_BLUE}${SEP}${BLACK}"
-    # Venv name
-    printf "  %s " "$venv_name"
-    # Arrow: grey → cyan
-    printf "${BG_CYAN}${FG_VENV}${SEP}${PAPER}"
-else
-    # Arrow: blue → cyan (no venv)
-    printf "${BG_CYAN}${FG_BLUE}${SEP}${PAPER}"
+    printf "${BG_VENV}${PREV_FG:+${PREV_FG}${SEP}}${BLACK} V:%s " "$venv_name"
+    PREV_FG="$FG_VENV"
 fi
 
-# Directory segment (cyan background, black text)
-printf " %s " "$display_dir"
+# Directory segment (cyan background, paper text)
+printf "${BG_CYAN}${PREV_FG:+${PREV_FG}${SEP}}${PAPER} %s " "$display_dir"
+PREV_FG="$FG_CYAN"
 
 # Git segment (if in git repo)
 if git -C "$current_dir" rev-parse --git-dir > /dev/null 2>&1; then
