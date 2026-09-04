@@ -65,6 +65,15 @@ keymap("n", "<leader>nS", ":split <C-r>=fnameescape(expand('%:p:h'))<CR>/",
 keymap("n", "<leader>nb", "<cmd>vnew<CR>", { desc = "New buffer in vsplit" })
 keymap("n", "<leader>nB", "<cmd>new<CR>", { desc = "New buffer in hsplit" })
 
+-- A tab is a third destination and there are only two cases to spend, so here the
+-- case means file-or-scratch rather than vertical-or-horizontal: nt takes the path
+-- prefill that ns does, nT is the bare scratch buffer that nb is.
+-- Move between tabs with gt/gT, and <C-w>T pulls the current split out into its
+-- own tab. Both are built in; neither needs a mapping.
+keymap("n", "<leader>nt", ":tabedit <C-r>=fnameescape(expand('%:p:h'))<CR>/",
+  { desc = "New file in new tab (file's dir)" })
+keymap("n", "<leader>nT", "<cmd>tabnew<CR>", { desc = "New buffer in new tab" })
+
 -- ============================================================================
 -- Buffer Navigation
 -- ============================================================================
