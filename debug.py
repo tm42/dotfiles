@@ -20,6 +20,7 @@ and jq rather than reimplementing any of them: the thing under test is the
 real scripts, so a second implementation of their logic would pass while they
 fail.
 
+    ./debug.py wiring [--agent A] [--project DIR]  # read-only: is anything wired at all?
     ./debug.py inspect [WINDOW]              # read-only: why does that tab say that?
     ./debug.py chain [--agent claude|codex|opencode] [--target WINDOW]
     ./debug.py watch [--interval SECONDS] [--log PATH]
@@ -501,16 +502,20 @@ INSPECT_FIELDS = ("pane_id", "session_name", "window_index", "pane_index",
                   "pane_current_command", "pane_title", "window_active",
                   "pane_active", "session_attached", "@agent_state",
                   "@notice_txt", "@notice_name", "@notice_glyph", "@notice_at",
-                  "@agent_screen_at", "E:@agent_lbl")
+                  "@agent_screen_at", "E:@agent_lbl", "E:@tab", "E:@agent_is")
 
 
 def read_panes(target=None) -> list:
     """Every field the tab is built from, for one target or for every pane.
 
-    #{E:@agent_lbl} is the whole point of reading it here: it is the text the
-    window tab actually shows, expanded by tmux from the same option the status
-    line uses, so the report never has to reimplement .tmux.conf's conditionals
-    and then disagree with them."""
+    Three expansions, and the difference between them is the point.
+    window-status-format draws #{E:@tab}, so that and nothing else is what the
+    tab shows. @tab renders @agent_lbl only inside #{?#{E:@agent_is},...},
+    while @agent_lbl itself is unguarded and expands on every pane — including
+    a plain shell holding a stale @agent_state. Reading tmux's own expansions
+    rather than reimplementing .tmux.conf's conditionals is what stops the
+    report disagreeing with the screen; reading all three is what stops it
+    calling a label a tab."""
     args = ["list-panes", "-F", panes_format(*INSPECT_FIELDS)] + \
            (["-t", target] if target else ["-a"])
     r = tmux(*args)
@@ -527,24 +532,42 @@ def diagnose(pane: dict, now: int, hold: int, freeze: int) -> list:
     out = []
     state, title = pane["@agent_state"], pane["pane_title"]
     label, nat, pid = pane["E:@agent_lbl"], pane["@notice_at"], pane["pane_id"]
+    # @agent_lbl expands on every pane; @tab draws it only inside
+    # #{?#{E:@agent_is},...}. So @agent_is decides two things at once — whether
+    # the label is on screen, and whether any process is left to fire the hook
+    # that would clear the state behind it.
+    alive, tab = pane["E:@agent_is"] == "1", pane["E:@tab"]
 
     if label.startswith("Action Required"):
-        if state == "wait":
+        if state == "wait" and alive:
             out.append(
                 "the tab says Action Required because @agent_state is wait. Nothing retires a "
                 f"wait on a timer — status-tick.sh retires a frozen `working` after FREEZE={freeze}s "
-                "and nothing else. It clears when this pane's agent next fires UserPromptSubmit "
-                "(you submit a prompt) or Stop (a turn ends). If the agent has exited, no hook "
-                f"will fire again: `tmux set -pu -t {pid} @agent_state` is what is left.")
-        elif re.match(r"^[^|]*Action Required \|", title):
+                "and nothing else. The agent is still running in this pane, so it clears when it "
+                "next fires UserPromptSubmit (you submit a prompt) or Stop (a turn ends). Do not "
+                "clear it by hand: while the agent is alive, a wait is a prompt waiting for you.")
+        elif state == "wait":
+            out.append(
+                f"@agent_state is wait on a pane running {pane['pane_current_command']!r}, which "
+                "@agent_is does not match, so no agent is left here to fire the hook that would "
+                f"clear it. The tab is NOT showing this — it reads {tab!r} — but @agent_lbl still "
+                "expands to Action Required and pane-border-format draws that. "
+                f"`tmux set -pu -t {pid} @agent_state` is what is left.")
+        elif re.match(r"^[^|]*Action Required \|", title) and alive:
             out.append(
                 f"the tab says Action Required because the pane TITLE does, and @agent_state is "
                 f"{state!r}. Codex writes its run state into its own title, so punto is relaying "
                 "it and keeps relaying it until the agent rewrites it. Nothing in this repo "
                 "clears that, and nothing in this repo set it.")
+        elif re.match(r"^[^|]*Action Required \|", title):
+            out.append(
+                f"the pane TITLE says Action Required and @agent_state is {state!r}, but @agent_is "
+                f"does not match {pane['pane_current_command']!r}, so the tab is not relaying it — "
+                f"it reads {tab!r}. The title is what the agent left behind when it exited. Nothing "
+                "in this repo set it and nothing clears it but a new process writing a new title.")
         else:
-            out.append("the tab says Action Required and neither @agent_state nor the pane title "
-                       "explains it — read @agent_lbl in .tmux.conf")
+            out.append("@agent_lbl expands to Action Required and neither @agent_state nor the "
+                       "pane title explains it — read @agent_lbl in .tmux.conf")
 
     if pane["@notice_txt"] and not nat:
         out.append(
@@ -574,6 +597,20 @@ def cmd_inspect(args) -> int:
     evidence — which running status-tick.sh by hand would do."""
     now = int(time.time())
     hold, freeze = tick_constant("HOLD", 30), tick_constant("FREEZE", 30)
+
+    # Everything below reads @tab, @agent_lbl and @agent_is, and tmux expands an
+    # option that was never set to the empty string rather than failing. So on a
+    # server .tmux.conf never reached, every tab would read as blank and every
+    # pane as "no agent running here" — a confident wrong answer, which is the
+    # one thing this module exists not to produce. `chain` makes the same check
+    # for the same reason.
+    r = tmux("show", "-gv", "@agent_is")
+    if r.returncode != 0 or not r.stdout.strip():
+        bad("@agent_is is unset — .tmux.conf was never sourced into this server, so nothing "
+            "here draws a tab and nothing can be read as one. Every reading below would be "
+            "of an option that does not exist. `tmux source-file ~/.tmux.conf` first.")
+        return 1
+
     try:
         panes = read_panes(args.target)
     except ProbeFailed as e:
@@ -601,7 +638,11 @@ def cmd_inspect(args) -> int:
         print(f"\n{BOLD}{pane['session_name']}:{pane['window_index']}.{pane['pane_index']}{OFF}"
               f"  {pane['pane_id']}  {pane['pane_current_command']}"
               f"  {'foreground' if fg else 'background'}")
-        print(f"  tab shows    : {pane['E:@agent_lbl']!r}")
+        print(f"  tab shows    : {pane['E:@tab']!r}")
+        print(f"  @agent_lbl   : {pane['E:@agent_lbl']!r}"
+              + ("" if pane["E:@agent_is"] == "1" else
+                 f"   {DIM}(not on the tab: @agent_is does not match "
+                 f"{pane['pane_current_command']!r}){OFF}"))
         print(f"  @agent_state : {pane['@agent_state']!r}")
         nat = pane["@notice_at"]
         age = f"{now - int(nat)}s ago" if nat.isdigit() else f"{nat!r}"
@@ -766,6 +807,265 @@ def cmd_tap(args) -> int:
     return 0
 
 
+# ── wiring: has each agent been told to call the notifier at all? ─────────────
+
+# What agent-notify.sh does with each event it handles. Not authoritative on its
+# own: notify_case_events() below reads the script's own `case` arm labels and
+# cmd_wiring reports a disagreement, so this table is caught being stale instead
+# of being trusted after the notifier has moved on.
+NOTIFY_EVENTS = {
+    "PermissionRequest": "wait",
+    "UserPromptSubmit": "working",
+    "Stop": "ready",
+    "Notification": "ready",   # soft — never overwrites a pending wait
+}
+STATES = ("wait", "working", "ready")
+
+# `  PermissionRequest|Notification)` and `  Stop)  state=ready; ...` match;
+# `  *)`, `  fi ;;` and every comment or continuation line inside the block do
+# not, because none of them is a bare word immediately followed by `)`.
+CASE_ARM = re.compile(r"^\s*([A-Za-z][A-Za-z|]*)\)")
+
+
+def notify_case_events() -> set:
+    """The event names agent-notify.sh's `case $event in` actually handles.
+
+    Only the arm LABELS are readable this way. UserPromptSubmit and Stop set
+    their state on the arm line, but PermissionRequest|Notification decides its
+    state inside an if/else several lines down, so the event-to-state mapping
+    stays in NOTIFY_EVENTS and this answers the narrower question of whether
+    that table still names the same events the script does. An empty set means
+    the file could not be read or the block was not found, which the caller
+    reports rather than reading as "handles nothing"."""
+    try:
+        src = REAL_NOTIFY.read_text()
+    except OSError:
+        return set()
+    body = src.partition("case $event in")[2].partition("esac")[0]
+    events = set()
+    for line in body.splitlines():
+        m = CASE_ARM.match(line)
+        if m:
+            events.update(m.group(1).split("|"))
+    return events
+
+
+def hooks_from_json(path: Path):
+    """(event, command) for every hook in a Claude- or Codex-shaped settings
+    file. None if the file is absent; ValueError carrying the parse error if it
+    will not parse; OSError propagates, because a file that cannot be read and
+    a file that cannot be parsed are fixed by different things and the caller
+    says which.
+
+    The whole file is parsed, because JSON has no partial parse and these files
+    can hold tokens. Nothing but hook events and hook commands is returned, so
+    nothing else can reach the report."""
+    if not path.exists():
+        return None
+    raw = path.read_text()
+    try:
+        data = json.loads(raw)
+    except ValueError as e:
+        raise ValueError(str(e)) from None
+    out = []
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    if not isinstance(hooks, dict):
+        return out
+    for event, groups in hooks.items():
+        if not isinstance(groups, list):
+            continue
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            for hook in group.get("hooks") or []:
+                if isinstance(hook, dict):
+                    out.append((str(event), str(hook.get("command", ""))))
+    return out
+
+
+def points_at_notifier(command: str) -> bool:
+    """Whether a hook command runs ~/.tmux/agent-notify.sh. The path is written
+    three different ways across the configs that exist today — `~/.tmux/...`,
+    `$HOME/.tmux/...`, and an absolute path — so expand each token and compare,
+    then fall back to the basename, which is the test a person reading the file
+    applies."""
+    try:
+        tokens = shlex.split(command) if command else []
+    except ValueError:            # an unbalanced quote is still a command a human can read
+        tokens = command.split()
+    for tok in tokens:
+        expanded = os.path.expanduser(os.path.expandvars(tok))
+        if expanded and Path(expanded) == NOTIFY_LINK:
+            return True
+    return "agent-notify.sh" in command
+
+
+def tilde(p: Path) -> str:
+    try:
+        return "~/" + str(p.relative_to(HOME))
+    except ValueError:
+        return str(p)
+
+
+def claude_files(project: Path) -> list:
+    """Claude reads hooks from the user's settings and the project's, each with
+    a `.local` sibling. All four are named in the report whether or not they
+    exist, because "absent" and "present but not wired" are different answers
+    and a reader who cannot see which files were opened cannot tell them
+    apart."""
+    return [HOME / ".claude" / "settings.json",
+            HOME / ".claude" / "settings.local.json",
+            project / ".claude" / "settings.json",
+            project / ".claude" / "settings.local.json"]
+
+
+def report_json_agent(files: list) -> tuple:
+    """Print one JSON-configured agent's wiring, file by file, and return the
+    events bound to the notifier across all of them along with whether this
+    agent is configured here at all.
+
+    The second half of that pair is what stops the caller crying wolf: an agent
+    nobody installed contributes no hooks, and so does an agent whose install
+    half happened. Only the second is a fault."""
+    wired, present = set(), False
+    for path in files:
+        link = f" -> {tilde(path.resolve())}" if path.is_symlink() else ""
+        try:
+            hooks = hooks_from_json(path)
+        except OSError as e:
+            present = True
+            bad(f"{tilde(path)}{link} cannot be read: {e}")
+            continue
+        except ValueError as e:
+            present = True
+            bad(f"{tilde(path)}{link} does not parse: {e}. Every hook in it is lost, "
+                "including any that are correct.")
+            continue
+        if hooks is None:
+            # exists() follows symlinks, so a link into a checkout that is not
+            # there lands here — the commonest wiring fault after "never
+            # configured", and the one thing that tells them apart is the
+            # arrow, which was computed a line ago.
+            if path.is_symlink():
+                present = True
+                bad(f"{tilde(path)}{link} is a dangling symlink: nothing reads it, because "
+                    "the target is not there. `./check.py links repo` says where punto "
+                    "expects it.")
+            else:
+                print(f"    ·  {tilde(path)} — absent")
+            continue
+        present = True
+        mine = sorted((e, c) for e, c in hooks if points_at_notifier(c))
+        other = sorted({c for e, c in hooks if not points_at_notifier(c)})
+        if mine:
+            print(f"    {GREEN}✔{OFF}  {tilde(path)}{link}")
+            for event, command in mine:
+                wired.add(event)
+                print(f"         {event:<18} {command}")
+        elif hooks:
+            print(f"    ·  {tilde(path)}{link} — {len(hooks)} hook(s), none reaching the notifier")
+        else:
+            print(f"    ·  {tilde(path)}{link} — no hooks declared")
+        if other:
+            print(f"       {DIM}also bound here: {', '.join(other)}{OFF}")
+    return wired, present
+
+
+def report_opencode() -> set:
+    """opencode has no hooks file — the plugin's presence is the wiring — so the
+    events it sends are read out of the strings it passes to its own notify().
+    Measured from the file rather than listed here: a table of opencode's events
+    in this repo would be a third copy of something already written twice."""
+    plugdir = HOME / ".config" / "opencode" / "plugins"
+    files = sorted(plugdir.glob("*.ts")) if plugdir.is_dir() else []
+    if not files:
+        print(f"    ·  {tilde(plugdir)} — no plugin file")
+        return set(), False
+    wired = set()
+    for path in files:
+        link = f" -> {tilde(path.resolve())}" if path.is_symlink() else ""
+        try:
+            src = path.read_text(errors="replace")
+        except OSError as e:
+            bad(f"{tilde(path)}{link} cannot be read: {e}")
+            continue
+        if "agent-notify.sh" not in src:
+            print(f"    ·  {tilde(path)}{link} — does not mention the notifier")
+            continue
+        events = set(re.findall(r'notify\(\s*"(\w+)"', src))
+        print(f"    {GREEN}✔{OFF}  {tilde(path)}{link}")
+        print("         calls the notifier with: "
+              + (", ".join(sorted(events)) if events else "no literal event name found in the source"))
+        wired |= events
+    return wired, True
+
+
+def cmd_wiring(args) -> int:
+    """Read-only, and the one subcommand that needs no tmux server: whether an
+    agent was ever told to call the notifier is upstream of everything `chain`
+    tests, and a chain that is alive end to end is still silent if nothing calls
+    it. Reads configuration only — it cannot see whether a hook fires, which is
+    what `tap` records."""
+    project = Path(args.project).resolve() if args.project else Path.cwd()
+    say(f"wiring — who calls {tilde(NOTIFY_LINK)}?  (project: {tilde(project)})")
+
+    target = current_link_target()
+    if target is None:
+        bad(f"{tilde(NOTIFY_LINK)} is not a symlink, or is broken. Nothing calling that path "
+            "runs at all; `./check.py links repo` says what punto expects there.")
+    elif target == WRAPPER_PATH.resolve():
+        warn(f"{tilde(NOTIFY_LINK)} points at the tap wrapper — `./debug.py tap off` puts it back.")
+    else:
+        ok(f"{tilde(NOTIFY_LINK)} -> {tilde(target)}")
+
+    handled = notify_case_events()
+    if not handled:
+        warn(f"could not read the `case` arms out of {tilde(REAL_NOTIFY)}, so the event names "
+             "below are this script's own table with nothing checking them.")
+    else:
+        stale = set(NOTIFY_EVENTS) ^ handled
+        if stale:
+            warn("debug.py's event table and agent-notify.sh disagree on "
+                 + ", ".join(sorted(stale))
+                 + ". The table is stale, so the states reported below are not to be trusted.")
+
+    for agent in ([args.agent] if args.agent else ["claude", "codex", "opencode"]):
+        print(f"\n  {BOLD}{agent}{OFF}")
+        if agent == "claude":
+            wired, present = report_json_agent(claude_files(project))
+        elif agent == "codex":
+            wired, present = report_json_agent([HOME / ".codex" / "hooks.json"])
+        else:
+            wired, present = report_opencode()
+
+        if not wired and not present:
+            # Two agents of the three are not installed on a typical machine.
+            # Reporting that as a fault would make a non-zero exit the normal
+            # case, and an exit code that is 1 on a healthy machine is one
+            # nobody reads twice.
+            print(f"       {DIM}not configured on this machine — nothing to wire.{OFF}")
+            continue
+        if not wired:
+            bad(f"{agent} is configured here and none of it reaches the notifier, so its panes "
+                "never get a state or a notice — every other link being healthy changes nothing.")
+            continue
+        reach = {NOTIFY_EVENTS[e] for e in wired if e in NOTIFY_EVENTS}
+        print(f"       reaches: {', '.join(s for s in STATES if s in reach)}")
+        missing = [s for s in STATES if s not in reach]
+        if missing:
+            print(f"       {DIM}not reachable: {', '.join(missing)} — nothing wired here maps "
+                  f"to {'them' if len(missing) > 1 else 'it'}.{OFF}")
+        unknown = sorted(e for e in wired if e not in NOTIFY_EVENTS)
+        if unknown:
+            print(f"       {DIM}also sent, with no arm in agent-notify.sh: {', '.join(unknown)} "
+                  f"— these take its `*` fallthrough, which sets no state.{OFF}")
+
+    print(f"\n{DIM}This reads configuration, not traffic: an agent that never sends an event "
+          f"looks the same here as one that was never wired for it. `./debug.py tap on` "
+          f"records what an agent actually sends.{OFF}")
+    return 1 if _fail else 0
+
+
 # ── entry point ──────────────────────────────────────────────
 
 
@@ -786,6 +1086,14 @@ def main() -> int:
                               "target: 3, sess:3, %%12. Its options are put back afterwards. Use it "
                               "when creating a window is what fails, or when you want the probe to "
                               "land somewhere you can watch.")
+
+    p_wiring = sub.add_parser(
+        "wiring", help="read-only: has each agent been told to call the notifier at all?")
+    p_wiring.add_argument("--agent", choices=("claude", "codex", "opencode"),
+                          help="just this one. Default: all three.")
+    p_wiring.add_argument("--project", metavar="DIR",
+                          help="the project whose .claude/settings*.json to read alongside the "
+                               "home pair. Default: the current directory.")
 
     p_inspect = sub.add_parser("inspect",
                                help="read-only: what state is each pane in, and what is stuck?")
@@ -809,6 +1117,8 @@ def main() -> int:
 
     if args.cmd == "chain":
         return cmd_chain(args)
+    if args.cmd == "wiring":
+        return cmd_wiring(args)
     if args.cmd == "inspect":
         return cmd_inspect(args)
     if args.cmd == "watch":
